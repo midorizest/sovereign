@@ -1,11 +1,11 @@
 # Chrome Web Store Submission — Sovereign v1.6.0
 
-Copy each field below into the Chrome Web Store Developer Dashboard. Everything here matches what the extension actually does, which is what reviewers check.
+Copy each field below into the Chrome Web Store Developer Dashboard (chrome.google.com/webstore/devconsole). Everything here matches what the extension actually does, which is what reviewers check.
 
 ---
 
 ## 1. Package
-Upload: `dist/sovereign-extension-1.6.0.zip`
+Upload: `sovereign-extension-1.6.0.zip` (the zip itself, not unzipped)
 
 ## 2. Store listing tab
 
@@ -68,10 +68,13 @@ Upload: `dist/sovereign-extension-1.6.0.zip`
 | Marquee promo tile (1400×560, optional) | `promo-marquee-1400x560.png` |
 
 **Official URL / Homepage** (optional)
-> The address where your web app (PWA) is hosted, e.g. `https://YOUR-USERNAME.github.io/sovereign/`
+> https://midorizest.github.io/sovereign/
 
 **Support URL or email**
 > themidoriway@gmail.com
+
+**Publisher name** (Account page)
+> Your choice, e.g. The Midori Way. Shown as "Offered by".
 
 **Mature content**
 > ✅ Yes, mark the item as containing mature content.
@@ -106,7 +109,7 @@ Then tick all three certifications:
 - ☑ I do not use or transfer user data to determine creditworthiness or for lending purposes
 
 **Privacy policy URL**
-> `https://YOUR-USERNAME.github.io/sovereign/privacy.html` (publish `privacy.html` first; see the README)
+> https://midorizest.github.io/sovereign/privacy.html
 
 ## 4. Distribution tab
 
@@ -120,13 +123,14 @@ Then tick all three certifications:
 **Pricing:** free. Chrome Web Store payments are no longer offered; if you charge for the program, do it outside the store.
 
 ## 5. Notes for the reviewer (optional field; paste this)
-> No account or login is needed. On first open, read and accept the disclaimer, then choose a track (Men or Women), a level (choose "Intermediate" to see all content), and a name. The side panel opens from the toolbar icon. The arrow icon at the top opens the full view in a tab. Settings (gear icon) holds export, import and reset. Sound sessions are under Protocols › Sound. The extension stores data only in chrome.storage.local and makes no network requests.
+> No account or login is needed. On first open, read and accept the disclaimer, then choose a track (Men or Women), a level (choose "Advanced" to see all content, including the advanced protocols and lessons), and a name. The side panel opens from the toolbar icon. The arrow icon at the top opens the full view in a tab. Settings (gear icon) holds export, import and reset. Sound sessions are under Protocols › Sound. The extension stores data only in chrome.storage.local and makes no network requests.
 
 ---
 
 ## Before you submit: checklist
+- [ ] Verify your contact email (themidoriway@gmail.com) on the dashboard's Account page
 - [ ] Turn on 2-Step Verification on your Google account (required to publish)
-- [x] Support email added to `privacy.html`; publish it on GitHub Pages (README › "Publishing the privacy policy")
+- [x] Support email added to `privacy.html` and published at https://midorizest.github.io/sovereign/privacy.html
 - [ ] Test the unpacked extension yourself (README › "Testing the extension")
 - [ ] Re-read the partner-practice and breast-massage entries in the Guide. They're non-explicit, but they're the content a reviewer is most likely to look at closely.
 - [ ] Upload the zip, fill in every field above, and submit for review (usually a few days; sensitive topics can take longer)
