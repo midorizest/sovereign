@@ -70,8 +70,10 @@ Upload: `sovereign-extension-1.6.0.zip` (the zip itself, not unzipped)
 **Official URL / Homepage** (optional)
 > https://midorizest.github.io/sovereign/
 
-**Support URL or email**
-> themidoriway@gmail.com
+**Support URL** (must be a web address, not an email)
+> https://midorizest.github.io/sovereign/support.html
+
+(The page lists themidoriway@gmail.com. If the dashboard also has a separate support email field, use that address there.)
 
 **Publisher name** (Account page)
 > Your choice, e.g. The Midori Way. Shown as "Offered by".
