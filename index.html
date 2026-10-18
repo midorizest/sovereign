@@ -1,0 +1,376 @@
+<!doctype html>
+<!--
+  SOVEREIGN — Sexual Energy Cultivation & Mastery
+  First build: onboarding, daily tracker, streaks, one guided protocol,
+  one lesson, journal, settings (backup / restore / reset).
+  Everything runs client-side. No network calls after first load.
+-->
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sovereign</title>
+  <meta name="description" content="A private practice tracker and teaching tool for sexual energy cultivation.">
+  <meta name="theme-color" content="#0b0b0c">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preload" href="fonts/plus-jakarta-sans.woff" as="font" type="font/woff" crossorigin>
+  <link rel="preload" href="fonts/cormorant-garamond.woff" as="font" type="font/woff" crossorigin>
+  <link rel="stylesheet" href="css/styles.css">
+  <!-- Scripts are deferred so they never block first paint. -->
+  <script src="js/content.js" defer></script>
+  <script src="js/protocols.js" defer></script>
+  <script src="js/sound-engine.js" defer></script>
+  <script src="js/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- ============================================================
+       ONBOARDING (shown only until a profile exists)
+       ============================================================ -->
+  <section id="onboarding" class="onboarding" hidden aria-labelledby="ob-title">
+    <div class="ob-inner">
+      <div class="sigil" aria-hidden="true"></div>
+      <p class="eyebrow">Sovereign</p>
+      <h1 id="ob-title" class="ob-title">Cultivation &amp; mastery</h1>
+
+      <!-- Step 1: disclaimer -->
+      <div class="ob-step" data-step="1">
+        <div class="card disclaimer" id="disclaimer-text"></div>
+        <label class="check-row">
+          <input type="checkbox" id="ob-agree">
+          <span>I have read and understand this.</span>
+        </label>
+        <button class="btn btn-primary btn-cta" id="ob-next-1" disabled>Begin</button>
+      </div>
+
+      <!-- Step 2: track -->
+      <div class="ob-step" data-step="2" hidden>
+        <h2 class="ob-q">Choose your path</h2>
+        <div class="choice-grid" role="radiogroup" aria-label="Track">
+          <button class="choice" role="radio" aria-checked="false" data-track="men">
+            <span class="choice-title">Men</span>
+            <span class="choice-sub">Retention, ojas, transmutation</span>
+          </button>
+          <button class="choice" role="radio" aria-checked="false" data-track="women">
+            <span class="choice-title">Women</span>
+            <span class="choice-sub">Cycle awareness, womb practice, transmutation</span>
+          </button>
+        </div>
+        <button class="btn btn-primary" id="ob-next-2" disabled>Continue</button>
+      </div>
+
+      <!-- Step 3: level -->
+      <div class="ob-step" data-step="3" hidden>
+        <h2 class="ob-q">Where are you in the practice?</h2>
+        <div class="choice-grid" role="radiogroup" aria-label="Experience level">
+          <button class="choice" role="radio" aria-checked="false" data-level="beginner">
+            <span class="choice-title">Beginner</span>
+            <span class="choice-sub">New to this work</span>
+          </button>
+          <button class="choice" role="radio" aria-checked="false" data-level="intermediate">
+            <span class="choice-title">Intermediate</span>
+            <span class="choice-sub">A steady practice of some months</span>
+          </button>
+          <button class="choice" role="radio" aria-checked="false" data-level="advanced">
+            <span class="choice-title">Advanced</span>
+            <span class="choice-sub">Years of committed practice</span>
+          </button>
+        </div>
+        <button class="btn btn-primary" id="ob-next-3" disabled>Continue</button>
+      </div>
+
+      <!-- Step 4: name + reminder -->
+      <div class="ob-step" data-step="4" hidden>
+        <h2 class="ob-q">What shall we call you?</h2>
+        <label class="field">
+          <span class="field-label">Your name or chosen sovereign name</span>
+          <input type="text" id="ob-name" maxlength="40" autocomplete="nickname">
+        </label>
+        <label class="field">
+          <span class="field-label">Daily practice reminder <span class="muted">(optional)</span></span>
+          <input type="time" id="ob-reminder">
+        </label>
+        <p class="hint">Your data never leaves this device. There is no account and no server.</p>
+        <button class="btn btn-primary btn-cta" id="ob-finish" disabled>Enter</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       MAIN APP SHELL
+       ============================================================ -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow" id="today-label"></p>
+        <p class="greeting" id="greeting"></p>
+      </div>
+      <div class="topbar-actions">
+      <button class="icon-btn" id="open-full" aria-label="Open full view" title="Open full view" hidden>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="icon-btn" id="open-settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path fill="none" stroke="currentColor" stroke-width="1.5" d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+      </button>
+      </div>
+    </header>
+
+    <main id="main" tabindex="-1">
+      <!-- ---------------- HOME ---------------- -->
+      <section class="view" id="view-home" aria-labelledby="home-h">
+        <h1 class="visually-hidden" id="home-h">Home</h1>
+        <div id="backup-banner"></div>
+        <div id="reminder-banner"></div>
+
+        <div class="card streak-card">
+          <div class="streak-main">
+            <span class="streak-num" id="streak-current">0</span>
+            <span class="streak-label">day streak</span>
+          </div>
+          <dl class="stats">
+            <div><dt>Longest</dt><dd id="streak-longest">0</dd></div>
+            <div><dt>Sovereign Points</dt><dd id="points-total">0</dd></div>
+            <div><dt>Today</dt><dd id="points-today">0</dd></div>
+          </dl>
+          <div class="progress" role="progressbar" aria-label="Today's practices completed" aria-valuemin="0" id="today-progress">
+            <span class="progress-fill" id="today-progress-fill"></span>
+          </div>
+          <p class="progress-caption" id="today-progress-caption"></p>
+          <div class="week" id="week-strip" aria-label="Last 7 days"></div>
+        </div>
+
+        <!-- Today's focus: one Guide practice chosen for real-world use -->
+        <div id="focus-card"></div>
+
+        <h2 class="section-title">Today's practice</h2>
+        <ul class="practice-list" id="practice-list"></ul>
+
+        <div class="card quote-card" id="daily-principle"></div>
+      </section>
+
+      <!-- ---------------- PROTOCOLS ---------------- -->
+      <section class="view" id="view-protocols" hidden aria-labelledby="proto-h">
+        <h1 class="view-title" id="proto-h">Protocols</h1>
+        <p class="view-sub">Guided protocols, breath and mantra, and sound.</p>
+        <div id="protocol-list"></div>
+      </section>
+
+      <!-- ---------------- LIBRARY ---------------- -->
+      <section class="view" id="view-library" hidden aria-labelledby="lib-h">
+        <h1 class="view-title" id="lib-h">Library</h1>
+        <p class="view-sub">Short teachings. Read slowly. Return often.</p>
+        <div id="lesson-list"></div>
+        <article id="lesson-reader" class="lesson" hidden></article>
+      </section>
+
+      <!-- ---------------- GUIDE (Build / Apply) ---------------- -->
+      <section class="view" id="view-guide" hidden aria-labelledby="guide-h">
+        <h1 class="view-title" id="guide-h">Guide</h1>
+        <p class="view-sub">Build the energy, apply it in your life, go deeper, and keep reading.</p>
+        <div class="tabs" role="tablist" aria-label="Guide sections">
+          <button class="tab" role="tab" id="tab-build" aria-controls="guide-panel" aria-selected="true" data-gtab="build">Build</button>
+          <button class="tab" role="tab" id="tab-apply" aria-controls="guide-panel" aria-selected="false" data-gtab="apply" tabindex="-1">Apply</button>
+          <button class="tab" role="tab" id="tab-deepen" aria-controls="guide-panel" aria-selected="false" data-gtab="deepen" tabindex="-1">Deepen</button>
+          <button class="tab" role="tab" id="tab-books" aria-controls="guide-panel" aria-selected="false" data-gtab="books" tabindex="-1">Books</button>
+        </div>
+        <label class="search">
+          <span class="visually-hidden">Search the guide</span>
+          <input type="search" id="guide-search" placeholder="Search practices…" autocomplete="off">
+        </label>
+        <div id="guide-panel" role="tabpanel" aria-labelledby="tab-build"></div>
+      </section>
+
+      <!-- ---------------- JOURNAL ---------------- -->
+      <section class="view" id="view-journal" hidden aria-labelledby="jr-h">
+        <h1 class="view-title" id="jr-h">Journal</h1>
+        <div class="card">
+          <p class="prompt-primary">What did you notice about your energy today?</p>
+          <p class="prompt-secondary" id="journal-prompt"></p>
+          <label class="visually-hidden" for="journal-text">Journal entry</label>
+          <textarea id="journal-text" rows="6" placeholder="Write freely. This stays on your device."></textarea>
+          <div class="row-end">
+            <span class="muted small" id="journal-status" aria-live="polite"></span>
+            <button class="btn btn-primary" id="journal-save">Save entry</button>
+          </div>
+        </div>
+
+        <div class="card calendar-card">
+          <div class="cal-head">
+            <button class="icon-btn" id="cal-prev" aria-label="Previous month">‹</button>
+            <h2 class="cal-title" id="cal-title" aria-live="polite"></h2>
+            <button class="icon-btn" id="cal-next" aria-label="Next month">›</button>
+          </div>
+          <div class="cal-grid" id="cal-grid" role="grid" aria-labelledby="cal-title"></div>
+          <p class="legend"><span class="dot dot-journal"></span> Journal entry <span class="dot dot-practice"></span> Practiced</p>
+        </div>
+
+        <h2 class="section-title" id="entries-title">Entries</h2>
+        <div id="entries-list"></div>
+      </section>
+    </main>
+
+    <!-- Bottom navigation -->
+    <nav class="bottom-nav" aria-label="Primary">
+      <button class="nav-btn" data-view="home" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/></svg>
+        <span>Home</span>
+      </button>
+      <button class="nav-btn" data-view="protocols">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M6 9c0-3 3-6 6-6s6 3 6 6-3 6-6 6-6 3-6 6" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span>Protocols</span>
+      </button>
+      <button class="nav-btn" data-view="library">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5C4 4.7 4.7 4 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5Zm16 0c0-.8-.7-1.5-1.5-1.5H13v16h5.5c.8 0 1.5-.7 1.5-1.5Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span>Library</span>
+      </button>
+      <button class="nav-btn" data-view="guide">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M15.5 8.5l-2 5-5 2 2-5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        <span>Guide</span>
+      </button>
+      <button class="nav-btn" data-view="journal">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6Z M9 9h7M9 13h7M9 17h4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span>Journal</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- ============================================================
+       OVERLAYS: timer, settings, dialogs, toasts
+       ============================================================ -->
+  <section id="timer" class="timer" hidden role="dialog" aria-modal="true" aria-labelledby="timer-title">
+    <button class="icon-btn timer-close" id="timer-close" aria-label="End protocol">✕</button>
+    <p class="eyebrow" id="timer-step-count"></p>
+    <h2 class="timer-title" id="timer-title"></h2>
+    <div class="timer-ring">
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="ring-bg" cx="100" cy="100" r="90"/>
+        <circle class="ring-fg" id="ring-fg" cx="100" cy="100" r="90"/>
+      </svg>
+      <div class="timer-time" id="timer-time" role="timer" aria-label="Time remaining">5:00</div>
+    </div>
+    <h3 class="timer-step-title" id="timer-step-title"></h3>
+    <p class="timer-prompt" id="timer-prompt" aria-live="polite"></p>
+    <div class="timer-controls">
+      <button class="btn" id="timer-back">Previous step</button>
+      <button class="btn btn-primary" id="timer-toggle">Pause</button>
+      <button class="btn" id="timer-skip">Next step</button>
+    </div>
+  </section>
+
+  <!-- Breath & mantra pacer / mala counter -->
+  <section id="pacer" class="timer pacer" hidden role="dialog" aria-modal="true" aria-labelledby="pacer-title">
+    <button class="icon-btn timer-close" id="pacer-close" aria-label="Close practice">✕</button>
+    <p class="eyebrow" id="pacer-eyebrow">Breath &amp; Mantra</p>
+    <h2 class="timer-title pacer-title" id="pacer-title"></h2>
+    <p class="pacer-note" id="pacer-note"></p>
+
+    <div id="pacer-setup" class="pacer-setup">
+      <p class="g-label">Session length</p>
+      <div class="seg" id="pacer-durations" role="group" aria-label="Session length"></div>
+      <p class="hint" id="pacer-cycle"></p>
+      <div class="btn-row" style="justify-content:center">
+        <button class="chip" id="pacer-sound" aria-pressed="true">Sound cues: on</button>
+      </div>
+      <button class="btn btn-primary btn-block btn-cta" id="pacer-begin">Begin</button>
+    </div>
+
+    <div id="pacer-run" hidden>
+      <div class="pacer-stage">
+        <div class="pacer-orb" id="pacer-orb"></div>
+        <div class="pacer-center">
+          <div class="pacer-phase" id="pacer-phase"></div>
+          <div class="pacer-count" id="pacer-count" aria-hidden="true"></div>
+        </div>
+      </div>
+      <p class="pacer-sub" id="pacer-sub" aria-live="polite"></p>
+      <p class="muted small" id="pacer-remaining"></p>
+      <div class="timer-controls">
+        <button class="btn btn-primary" id="pacer-toggle">Pause</button>
+        <button class="btn" id="pacer-finish">Finish &amp; log</button>
+      </div>
+    </div>
+
+    <div id="mala-run" hidden>
+      <label class="field mala-field">
+        <span class="field-label">Mantra</span>
+        <input type="text" id="mala-mantra" maxlength="60">
+      </label>
+      <div class="mala-stage">
+        <svg viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="ring-bg" cx="100" cy="100" r="90"/>
+          <circle class="ring-fg" id="mala-ring" cx="100" cy="100" r="90"/>
+        </svg>
+        <button class="mala-bead" id="mala-tap"><span id="mala-count">0</span><small>of 108</small></button>
+      </div>
+      <p class="muted small">Tap — or press Space — once per repetition. A soft bell marks every 27.</p>
+      <div class="timer-controls">
+        <button class="btn" id="mala-undo">Undo</button>
+        <button class="btn btn-primary" id="mala-finish">Finish &amp; log</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Sound player (binaural / isochronic) -->
+  <section id="sound-player" class="timer sound-player" hidden role="dialog" aria-modal="true" aria-labelledby="sp-title" data-mode="setup">
+    <button class="icon-btn timer-close" id="sp-close" aria-label="Close player (sound keeps playing)">✕</button>
+    <p class="eyebrow" id="sp-eyebrow"></p>
+    <h2 class="pacer-title" id="sp-title"></h2>
+    <p class="sp-freqs" id="sp-freqs"></p>
+
+    <div class="sp-stage">
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="ring-bg" cx="100" cy="100" r="90"/>
+        <circle class="ring-fg" id="sp-ring" cx="100" cy="100" r="90"/>
+      </svg>
+      <div class="sp-orb" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="sp-time" id="sp-time" role="timer"></div>
+    </div>
+
+    <div id="sp-setup" class="pacer-setup">
+      <p class="pacer-note" id="sp-desc"></p>
+      <p class="g-label">Session length</p>
+      <div class="seg" id="sp-durations" role="group" aria-label="Session length"></div>
+      <button class="btn btn-primary btn-block btn-cta" id="sp-begin">Begin</button>
+      <p class="hint" id="sp-pairs"></p>
+    </div>
+
+    <div id="sp-running" hidden>
+      <div class="timer-controls">
+        <button class="btn btn-primary" id="sp-toggle">Pause</button>
+        <button class="btn" id="sp-stop">End &amp; log</button>
+      </div>
+    </div>
+
+    <div class="sp-mix">
+      <label class="sp-slider"><span>Volume</span><input type="range" id="sp-volume" min="0" max="100" value="60"></label>
+      <label class="sp-slider" id="sp-noise-row"><span id="sp-noise-label">Noise</span><input type="range" id="sp-noise" min="0" max="100" value="50"></label>
+    </div>
+    <p class="muted small sp-foot">Fades in over 8 seconds and out over 6. Closing this screen keeps the sound playing.</p>
+  </section>
+
+  <section id="settings" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="sheet-inner">
+      <div class="sheet-head">
+        <h2 id="settings-title" class="view-title">Settings</h2>
+        <button class="icon-btn" id="close-settings" aria-label="Close settings">✕</button>
+      </div>
+      <div id="settings-body"></div>
+    </div>
+  </section>
+
+  <dialog id="dialog" aria-labelledby="dialog-title">
+    <form method="dialog" class="dialog-form">
+      <h2 id="dialog-title" class="dialog-title"></h2>
+      <div id="dialog-body"></div>
+      <div class="dialog-actions" id="dialog-actions"></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <noscript><p style="padding:2rem;color:#eee">Sovereign needs JavaScript enabled to run.</p></noscript>
+</body>
+</html>
