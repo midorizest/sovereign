@@ -24,7 +24,7 @@
 (() => {
   "use strict";
   const C = window.SOV; // content from content.js
-  const APP_VERSION = "1.6.0";
+  const APP_VERSION = "1.7.0";
   const STORAGE_KEY = "sovereign.v1";
 
   /* Platform: the same code runs as a website/PWA and as a Chrome extension.
@@ -650,6 +650,7 @@
     if (!p || !protocolAllowed(p)) return;
     Object.assign(T, { proto: p, idx: 0, running: true, startedAt: Date.now() });
     $("#timer-title").textContent = p.title;
+    $("#timer-cue-slot").innerHTML = cueSliderHTML("timer-cue-vol");
     openOverlay($("#timer"), confirmEndTimer);
     enterStep(0);
     requestWakeLock();
@@ -763,20 +764,71 @@
 
   /* Soft bell made with the Web Audio API — works offline, no audio files. */
   let audioCtx = null;
-  function chime(freq = 432, dur = 1.8, vol = 1) {
+  /* Guidance chimes (timer steps, breath cues, mala bells, milestones).
+     Their loudness follows Settings › Guidance sounds (0–100%, default 70%,
+     about twice as loud as before v1.7). A limiter prevents distortion, and
+     any sound session that is playing dips briefly so the cue is heard. */
+  let chimeOut = null;
+  const cueLevel = () => (state.settings.cueVolume ?? 0.7) * 3.2;
+  function chime(freq = 432, dur = 1.8, vol = 1, { duck = true } = {}) {
+    const level = cueLevel() * vol;
+    if (level <= 0.001) return;
     try {
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      if (!chimeOut) {
+        chimeOut = audioCtx.createDynamicsCompressor();       // gentle limiter
+        chimeOut.threshold.value = -10; chimeOut.knee.value = 6; chimeOut.ratio.value = 8;
+        chimeOut.attack.value = 0.003; chimeOut.release.value = 0.25;
+        chimeOut.connect(audioCtx.destination);
+      }
       const t = audioCtx.currentTime;
-      [1, 2.01].forEach((mult, i) => {
+      // A bell: fundamental, a soft octave, and a faint fifth above for presence
+      [[1, 0.12], [2.01, 0.035], [3.0, 0.015]].forEach(([mult, base]) => {
         const o = audioCtx.createOscillator(), g = audioCtx.createGain();
         o.type = "sine"; o.frequency.value = freq * mult;
         g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(Math.max(0.0002, (i ? 0.03 : 0.12) * vol), t + 0.02);
+        g.gain.exponentialRampToValueAtTime(Math.max(0.0002, base * level), t + 0.015);
         g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-        o.connect(g).connect(audioCtx.destination);
+        o.connect(g).connect(chimeOut);
         o.start(t); o.stop(t + dur + 0.05);
       });
+      if (duck) duckSession();
     } catch (_) { /* audio unavailable — silent is fine */ }
+  }
+  /** Dip a playing binaural/noise session for a moment so the chime cuts through. */
+  function duckSession() {
+    if (state.settings.duckSessions === false) return;
+    if (EXT) { chrome.runtime.sendMessage({ target: "offscreen", type: "duck" }).catch(() => {}); return; }
+    if (typeof SND !== "undefined" && SND.local && !SND.local.ended) SND.local.duck();
+  }
+
+  /* Shared "Guidance sounds" slider markup + behaviour, used in the pacer,
+     the protocol timer and Settings so they always agree. */
+  const cueSliderHTML = (id) => `
+    <div class="cue-vol">
+      <label class="sp-slider"><span>Guidance volume</span>
+        <input type="range" class="cue-range" id="${id}" min="0" max="100" step="5" value="${Math.round((state.settings.cueVolume ?? 0.7) * 100)}" aria-valuetext="${Math.round((state.settings.cueVolume ?? 0.7) * 100)} percent"></label>
+      <button class="link-btn cue-test" type="button" data-cuetest>Test</button>
+    </div>`;
+  function syncCueSliders() {
+    const v = Math.round((state.settings.cueVolume ?? 0.7) * 100);
+    $$(".cue-range").forEach((r) => { r.value = v; r.setAttribute("aria-valuetext", `${v} percent`); });
+  }
+  function bindCueSliders() {
+    let saveT;
+    document.addEventListener("input", (e) => {
+      if (!e.target.classList?.contains("cue-range")) return;
+      state.settings.cueVolume = Number(e.target.value) / 100;
+      e.target.setAttribute("aria-valuetext", `${e.target.value} percent`);
+      clearTimeout(saveT); saveT = setTimeout(save, 300);
+    });
+    document.addEventListener("change", (e) => {
+      if (e.target.classList?.contains("cue-range")) { syncCueSliders(); chime(432, 1.2, 1, { duck: false }); }
+    });
+    document.addEventListener("click", (e) => {
+      if (e.target.closest("[data-cuetest]")) chime(432, 1.4);
+    });
   }
   async function requestWakeLock() {
     try { if ("wakeLock" in navigator) T.wake = await navigator.wakeLock.request("screen"); } catch (_) {}
@@ -1196,6 +1248,7 @@
     $("#pacer-setup").hidden = false;
     $("#pacer-run").hidden = true;
     $("#mala-run").hidden = true;
+    $("#pacer-cue-slot").innerHTML = cueSliderHTML("pacer-cue-vol");
     renderPacerSetup();
     openOverlay($("#pacer"), closePacer);
   }
@@ -1231,7 +1284,7 @@
     if (ph.grow === 1) orb.style.transform = "scale(1)";
     if (ph.grow === 0) orb.style.transform = "scale(.5)";
     orb.classList.toggle("holding", ph.grow === null);
-    if (state.settings.pacerSound !== false) chime(ph.grow === 1 ? 396 : ph.grow === 0 ? 264 : 528, 0.9, 0.35);
+    if (state.settings.pacerSound !== false) chime(ph.grow === 1 ? 396 : ph.grow === 0 ? 264 : 528, 1.1, 0.75);
   }
   function pacerTick() {
     if (!P.running) return;
@@ -1294,6 +1347,7 @@
     $("#pacer-setup").hidden = true;
     $("#pacer-run").hidden = true;
     $("#mala-run").hidden = false;
+    $("#pacer-cue-slot").innerHTML = cueSliderHTML("pacer-cue-vol");
     $("#mala-mantra").value = P.mala.mantra;
     updateMala();
     openOverlay($("#pacer"), closePacer);
@@ -1310,7 +1364,7 @@
     if (P.mala.count >= 108) return;
     P.mala.count++;
     if (navigator.vibrate) navigator.vibrate(12);
-    if (P.mala.count % 27 === 0 && state.settings.pacerSound !== false) chime(432, 1.6, 0.6);
+    if (P.mala.count % 27 === 0 && state.settings.pacerSound !== false) chime(432, 1.6, 0.85);
     updateMala();
     if (P.mala.count === 108) setTimeout(() => finishMala(true), 400);
   }
@@ -1709,6 +1763,10 @@
         <p class="hint" style="margin-top:10px">Nothing is ever scheduled for you. At most two a day: your daily practice reminder (leave blank for none), and a focus reminder only if you add one on Home. Each is skipped if it's already done.
           Times follow this device's time zone (${esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "local time")}).
           ${EXT ? "Reminders arrive even when Sovereign is closed, as long as Chrome is running." : "On the web, reminders arrive while Sovereign is open or minimised."}</p></div>
+      <div class="setting-group"><h3>Guidance sounds</h3>
+        ${cueSliderHTML("set-cue-vol")}
+        ${seg("duckSessions", [["on", "Dip frequencies during cues"], ["off", "Keep frequencies steady"]], state.settings.duckSessions === false ? "off" : "on")}
+        <p class="hint" style="margin-top:10px">The bells and tones that guide breath, protocol steps and mala counts. When a Sound session is playing, it can dip for a moment so each cue is easy to hear. To change the frequencies themselves, use the volume slider in the Sound player.</p></div>
       <div class="setting-group"><h3>Appearance</h3>${seg("theme", [["dark", "Dark"], ["light", "Light"]], state.settings.theme)}</div>
       <div class="setting-group"><h3>Your data</h3>
         <p class="hint">Everything is stored only in this browser. Clearing browser data will erase it.
@@ -1741,10 +1799,11 @@
         if (set === "theme") { state.settings.theme = val; applyTheme(); }
         else if (set === "reminders") state.settings.reminders = val === "on";
         else if (set === "reminderSound") state.settings.reminderSound = val;
+        else if (set === "duckSessions") state.settings.duckSessions = val === "on";
         else state.profile[set] = val;
         save();
         $$(`[data-set="${set}"]`, body).forEach((x) => x.setAttribute("aria-pressed", x.dataset.val === val));
-        toast(set === "reminders" ? `Reminders ${val}` : set === "reminderSound" ? `Reminder sound: ${cap(val)}` : `${cap(set)} set to ${cap(val)}`);
+        toast(set === "duckSessions" ? (val === "on" ? "Frequencies will dip during cues" : "Frequencies stay steady") : set === "reminders" ? `Reminders ${val}` : set === "reminderSound" ? `Reminder sound: ${cap(val)}` : `${cap(set)} set to ${cap(val)}`);
       }
       if (b.id === "set-om-preview") { b.disabled = true; SovSound.playOm(0.8).finally(() => (b.disabled = false)); }
       if (b.id === "set-export") exportData();
@@ -1934,7 +1993,7 @@
       b.addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("index.html?full=1") }));
     }
     if (IS_FULL) document.body.classList.add("full-view");
-    bindHome(); bindBanners(); bindGuide(); bindFocus(); bindPacer(); bindSound(); bindTimer(); bindLibrary(); bindJournal(); bindSettings();
+    bindHome(); bindBanners(); bindGuide(); bindFocus(); bindPacer(); bindSound(); bindCueSliders(); bindTimer(); bindLibrary(); bindJournal(); bindSettings();
     $$(".nav-btn").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
     go("home");
     checkMilestones();

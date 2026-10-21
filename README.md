@@ -1,4 +1,4 @@
-# Sovereign — Cultivation & Mastery (v1.6 · Web + Chrome Extension)
+# Sovereign — Cultivation & Mastery (v1.7 · Web + Chrome Extension)
 
 A private, offline-capable practice tracker and teaching app for sexual energy cultivation.
 No account, no server, no tracking. Everything stays on the device.
@@ -35,6 +35,11 @@ No account, no server, no tracking. Everything stays on the device.
   - The player's visuals breathe slowly and never flash at the beat rate.
   - To add or change a preset, edit `SOV.SOUND.presets` in `js/content.js`.
   - **Recommended creator:** fill in `SOV.SOUND.credits` in `js/content.js` (name, url, note) to show a shout-out card with a link at the bottom of the Sound tab. It stays hidden while the url is empty.
+- **Guidance volume (v1.7):**
+  - The bells and tones that guide breath, protocol steps and mala counts are about twice as loud by default (+7 dB), and the breath pacer's cues are louder still (about +13 dB).
+  - A "Guidance volume" slider with a Test button sits in the breath pacer, the protocol timer and Settings › Guidance sounds. All three stay in sync.
+  - A limiter prevents distortion at full volume.
+  - While a Sound session is playing, it dips for about a second at each cue so the cue is heard clearly. This can be switched off in Settings.
 - **Gentle reminders and sound fixes (v1.6):**
   - Opt-in reminders, at most two a day: the daily practice reminder (set in Settings) and an optional focus reminder ("Remind me later today" on the Home focus card).
   - Each reminder is skipped if it's already done, and a master On/Off switch sits in Settings.
@@ -169,14 +174,14 @@ extension/background.js        Toolbar → side panel; daily reminder; sound-ses
 extension/offscreen.html/.js   Hidden audio page so sound keeps playing when the panel closes
 build_extension.py             Builds dist/ from the shared source
 dist/sovereign-extension/      Built extension (Load unpacked this folder)
-dist/sovereign-extension-1.6.0.zip   Upload this to the Chrome Web Store
+dist/sovereign-extension-1.7.0.zip   Upload this to the Chrome Web Store
 privacy.html                   Privacy policy (publish it; the store requires a URL)
 STORE_LISTING.md               Every field for the store dashboard, ready to paste
 store-assets/                  Icon, 5 screenshots, promo tiles (exact required sizes)
 ```
 
 ## Testing the extension on your Chromebook
-1. Unzip `sovereign-extension-1.6.0.zip` into a folder in *My files › Downloads*.
+1. Unzip `sovereign-extension-1.7.0.zip` into a folder in *My files › Downloads*.
 2. In Chrome, go to `chrome://extensions` and turn on **Developer mode** (top right).
 3. Click **Load unpacked** and select the unzipped folder (the one containing `manifest.json`).
 4. Pin Sovereign: click the puzzle-piece icon in the toolbar, then the pin next to Sovereign.

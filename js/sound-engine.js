@@ -153,6 +153,16 @@
       if (!this.ending && this.elapsed >= this.total - FADE_OUT) this.stop({ log: true, completed: true });
     }
 
+    /** Briefly lower the session so a guidance chime can be heard clearly, then restore it. */
+    duck(depth = 0.4, hold = 0.9) {
+      if (!this.ctx || this.ending) return;
+      const g = this.master.gain, t = this.ctx.currentTime;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.setTargetAtTime(this.volume * depth, t, 0.05);       // dip quickly
+      g.setTargetAtTime(this.volume, t + hold, 0.25);        // ease back
+    }
+
     setVolume(v) {
       this.volume = Math.min(1, Math.max(0, v));
       if (this.ctx && !this.ending) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.1);

@@ -37,6 +37,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     })();
     return true; // async reply
   }
+  if (msg.type === "duck") {
+    if (session && !session.ended) session.duck();
+    reply({ ok: true });
+    return false;
+  }
   if (msg.type === "om") {
     SovSound.playOm(0.8).then(() => reply({ ok: true })).catch(() => reply({ ok: false }));
     return true; // reply when the Om has finished
