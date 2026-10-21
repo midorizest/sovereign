@@ -24,7 +24,7 @@
 (() => {
   "use strict";
   const C = window.SOV; // content from content.js
-  const APP_VERSION = "1.8.0";
+  const APP_VERSION = "1.9.0";
   const STORAGE_KEY = "sovereign.v1";
 
   /* Platform: the same code runs as a website/PWA and as a Chrome extension.
@@ -32,6 +32,17 @@
      IS_FULL – the full-view tab (?full=1) rather than the side panel */
   const EXT = !!(window.chrome && chrome.runtime && chrome.runtime.id && chrome.storage);
   const IS_FULL = new URLSearchParams(location.search).has("full");
+  /* NATIVE – running inside the Android app (Capacitor). Native plugins give
+     real reminders when the app is closed, the back button, and a share sheet
+     for backups. */
+  const CAP = window.Capacitor;
+  const NATIVE = !!(CAP && ((CAP.isNativePlatform && CAP.isNativePlatform()) || (CAP.getPlatform && CAP.getPlatform() !== "web")));
+  const plugin = (name) => {
+    if (!NATIVE) return null;
+    const p = CAP.Plugins && CAP.Plugins[name];
+    if (p) return p;
+    try { return CAP.registerPlugin ? CAP.registerPlugin(name) : null; } catch (_) { return null; }
+  };
   const WRITER_ID = Math.random().toString(36).slice(2); // identifies this window's saves
   let appStarted = false;
 
@@ -291,6 +302,87 @@
     }
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch (e) { toast("Could not save — storage may be full. Please export a backup."); }
+    if (NATIVE) queueNativeSchedule();
+  }
+
+  /* ========================================================================
+     NATIVE (Android) — reminders, back button, backups
+     Reminders are scheduled with the system as one-shot alarms for the next
+     7 days, recomputed after every change: today's is skipped once you've
+     practised, the focus reminder is skipped once applied, and everything is
+     cancelled when reminders are off. So they arrive even when Sovereign is
+     closed, but still never more than two a day.
+     ======================================================================== */
+  let nativeTimer = null, channelsReady = false;
+  function queueNativeSchedule() { clearTimeout(nativeTimer); nativeTimer = setTimeout(scheduleNative, 800); }
+  async function ensureChannels() {
+    const LN = plugin("LocalNotifications");
+    if (!LN || channelsReady) return;
+    try {
+      // Android plays a channel's sound; the Om lives in res/raw/om.wav.
+      await LN.createChannel({ id: "sovereign-om", name: "Reminders · Om", description: "Gentle reminders with the Om sound", importance: 4, sound: "om.wav", visibility: 0, vibration: true });
+      await LN.createChannel({ id: "sovereign-quiet", name: "Reminders · Silent", description: "Gentle reminders without sound", importance: 2, visibility: 0, vibration: false });
+      channelsReady = true;
+    } catch (_) {}
+  }
+  async function scheduleNative() {
+    const LN = plugin("LocalNotifications");
+    if (!LN || !state.profile) return;
+    try {
+      const pending = await LN.getPending();
+      const mine = (pending.notifications || []).filter((n) => n.id >= 100 && n.id <= 200).map((n) => ({ id: n.id }));
+      if (mine.length) await LN.cancel({ notifications: mine });
+      if (state.settings.reminders === false) return;
+      await ensureChannels();
+      const channelId = state.settings.reminderSound === "silent" ? "sovereign-quiet" : "sovereign-om";
+      const discreet = state.settings.discreet !== false;
+      const now = new Date(), list = [];
+      const r = state.profile.reminder;
+      if (r) {
+        const [h, m] = r.split(":").map(Number);
+        for (let i = 0; i < 7; i++) {
+          const at = new Date(); at.setDate(at.getDate() + i); at.setHours(h, m, 0, 0);
+          if (at <= now || (i === 0 && practiced(todayKey()))) continue;
+          list.push({ id: 100 + i, title: "Sovereign", channelId, schedule: { at, allowWhileIdle: true },
+            body: discreet ? "A gentle reminder from Sovereign." : "Your practice time has arrived. Five minutes is enough to begin." });
+        }
+      }
+      const f = day().focus;
+      if (f && f.remindAt && !f.done) {
+        const [h, m] = f.remindAt.split(":").map(Number);
+        const at = new Date(); at.setHours(h, m, 0, 0);
+        if (at > now) list.push({ id: 200, channelId, schedule: { at, allowWhileIdle: true },
+          title: discreet ? "Sovereign" : "Today’s focus", body: discreet ? "A gentle reminder from Sovereign." : `${f.title}. ${f.cue}` });
+      }
+      if (list.length) await LN.schedule({ notifications: list });
+    } catch (e) { console.warn("Could not schedule reminders", e); }
+  }
+  function bindNative() {
+    if (!NATIVE) return;
+    document.body.classList.add("native");
+    const App = plugin("App");
+    App && App.addListener("backButton", () => {
+      // Back closes whatever is open, then returns Home, then leaves the app.
+      const d = $("#dialog");
+      if (d.open) { d.close(); return; }
+      if (!$("#timer").hidden) { $("#timer-close").click(); return; }
+      if (!$("#pacer").hidden) { $("#pacer-close").click(); return; }
+      if (!$("#sound-player").hidden) { $("#sp-close").click(); return; }
+      if (!$("#settings").hidden) { closeSettings(); return; }
+      if (!$("#lesson-reader").hidden && currentView === "library") { renderLibrary(); return; }
+      if (appStarted && currentView !== "home" && !$("#app").hidden) { go("home"); return; }
+      App.exitApp();
+    });
+    // Coming back to the app: refresh the day and the reminder schedule.
+    App && App.addListener("resume", () => { if (appStarted) { render(); queueNativeSchedule(); } });
+    queueNativeSchedule();
+  }
+  /** Android: save the backup through the share sheet (Files, Drive, email…). */
+  async function nativeExport(json, filename) {
+    const FS = plugin("Filesystem"), Share = plugin("Share");
+    if (!FS || !Share) throw new Error("plugins missing");
+    const w = await FS.writeFile({ path: filename, data: json, directory: "CACHE", encoding: "utf8" });
+    await Share.share({ title: "Sovereign backup", dialogTitle: "Save your Sovereign backup", url: w.uri });
   }
 
   /** Extension only: keep the side panel and full-view tab in step. */
@@ -1965,7 +2057,7 @@
           <button class="link-btn" id="set-om-preview">Preview</button></div>
         <p class="hint" style="margin-top:10px">Nothing is ever scheduled for you. At most two a day: your daily practice reminder (leave blank for none), and a focus reminder only if you add one on Home. Each is skipped if it's already done.
           Times follow this device's time zone (${esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "local time")}).
-          ${EXT ? "Reminders arrive even when Sovereign is closed, as long as Chrome is running." : "On the web, reminders arrive while Sovereign is open or minimised."}</p></div>
+          ${NATIVE ? "Reminders arrive even when Sovereign is closed." : EXT ? "Reminders arrive even when Sovereign is closed, as long as Chrome is running." : "On the web, reminders arrive while Sovereign is open or minimised."}</p></div>
       <div class="setting-group"><h3>Guidance sounds</h3>
         ${cueSliderHTML("set-cue-vol")}
         ${seg("duckSessions", [["on", "Dip frequencies during cues"], ["off", "Keep frequencies steady"]], state.settings.duckSessions === false ? "off" : "on")}
@@ -1983,7 +2075,7 @@
         ${seg("discreet", [["on", "Discreet"], ["off", "Show details"]], state.settings.discreet === false ? "off" : "on")}
         <p class="hint" style="margin-top:10px">Discreet notifications say only "A gentle reminder from Sovereign", so nothing personal appears on your screen. Sovereign never sends your data anywhere and can't load anything from the internet.</p></div>
       <div class="setting-group"><h3>Your data</h3>
-        <p class="hint">Everything is stored only in this browser. Clearing browser data will erase it.
+        <p class="hint">${NATIVE ? "Everything is stored only on this phone. Uninstalling Sovereign erases it." : "Everything is stored only in this browser. Clearing browser data will erase it."}
         ${state.meta.lastExport ? `Last backup: ${new Date(state.meta.lastExport).toLocaleDateString()}.` : "<strong>No backup yet.</strong>"}</p>
         <div class="btn-row">
           <button class="btn" id="set-export">Export backup</button>
@@ -2107,6 +2199,15 @@
       const box = await SovSecure.encryptJSON(KEY, state);
       payload = { app: "sovereign", version: APP_VERSION, exportedAt: payload.exportedAt, encrypted: true,
         salt: state.security.salt, iter: state.security.iter, check: state.security.check, ...box };
+    }
+    if (NATIVE) {
+      try {
+        await nativeExport(JSON.stringify(payload, null, 2), `sovereign-backup-${todayKey()}.json`);
+        state.meta.lastExport = new Date().toISOString(); save();
+        if (currentView === "home") renderBanners();
+        toast("Choose where to keep your backup — Files or Drive work well");
+      } catch (e) { if (!/cancel/i.test(String(e?.message || e))) toast("Backup could not be shared."); }
+      return;
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -2239,6 +2340,7 @@
      ======================================================================== */
   function requestNotifyPermission() {
     if (EXT) return; // the extension's background worker handles notifications
+    if (NATIVE) { const LN = plugin("LocalNotifications"); LN && LN.requestPermissions().then(queueNativeSchedule).catch(() => {}); return; }
     if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
   }
   /** Play the Om (unless silent) and show a system notification if allowed. Website only. */
@@ -2261,14 +2363,14 @@
     const r = state.profile.reminder;
     if (r && hhmm >= r && state.meta.lastNotified !== tk && !practiced(tk)) {
       state.meta.lastNotified = tk; save();
-      if (!EXT) deliverReminder("Sovereign", state.settings.discreet === false ? "Your practice time has arrived. Five minutes is enough to begin." : "A gentle reminder from Sovereign.", "sovereign-reminder");
+      if (!EXT && !NATIVE) deliverReminder("Sovereign", state.settings.discreet === false ? "Your practice time has arrived. Five minutes is enough to begin." : "A gentle reminder from Sovereign.", "sovereign-reminder");
       if (currentView === "home") renderBanners();
     }
 
     // Focus reminder — only if the member set one and hasn't applied the focus yet.
     // (In the extension the background worker delivers it, even when the panel is closed.)
     const f = day().focus;
-    if (!EXT && f && f.remindAt && !f.done && !f.notified && hhmm >= f.remindAt) {
+    if (!EXT && !NATIVE && f && f.remindAt && !f.done && !f.notified && hhmm >= f.remindAt) {
       f.notified = true; save();
       deliverReminder(state.settings.discreet === false ? "Today’s focus" : "Sovereign",
         state.settings.discreet === false ? `${f.title}. ${f.cue}` : "A gentle reminder from Sovereign.", "sovereign-focus");
@@ -2281,7 +2383,7 @@
      15. SERVICE WORKER & BOOT
      ======================================================================== */
   function registerSW() {
-    if (EXT) return; // extension files are packaged locally — already offline
+    if (EXT || NATIVE) return; // packaged locally — already offline
     if (!("serviceWorker" in navigator)) return;
     if (location.protocol === "file:") { console.info("Offline mode needs the app served over http(s)."); return; }
     navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW registration failed", e));
@@ -2318,6 +2420,7 @@
     applyTheme();
     registerSW();
     watchOtherWindows();
+    bindNative();
     $("#lock-form").addEventListener("submit", tryUnlock);
     $("#lock-forgot").addEventListener("click", forgotPasscode);
     bindAutoLock();

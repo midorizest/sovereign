@@ -1,0 +1,79 @@
+name: Android APK (beta)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-beta
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Capacitor
+        run: npm install --no-audit --no-fund
+
+      - name: Prepare web app
+        run: node prepare-web.mjs
+
+      - name: Create Android project
+        run: npx cap add android
+
+      - name: Apply Sovereign icons, splash and sounds
+        run: |
+          RES=android/app/src/main/res
+          rm -f $RES/drawable*/splash.png
+          cp -R res/. $RES/
+          # Exact timing for gentle reminders on Android 12+ (falls back to inexact if denied)
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
+          npx cap sync android
+
+      - name: Set version
+        run: |
+          VER=$(node -p "require('../extension/manifest.json').version")
+          echo "VER=$VER" >> $GITHUB_ENV
+          sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/; s/versionName \"[^\"]*\"/versionName \"$VER\"/" android/app/build.gradle
+          grep -E "versionCode|versionName" android/app/build.gradle
+
+      - name: Use the shared beta signing key
+        run: mkdir -p ~/.android && cp debug.keystore ~/.android/debug.keystore
+
+      - name: Build APK
+        working-directory: android-build/android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "Sovereign-$VER.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sovereign-${{ env.VER }}-apk
+          path: android-build/Sovereign-*.apk
+
+      - name: Publish to the beta release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete beta --yes --cleanup-tag || true
+          gh release create beta "Sovereign-$VER.apk" --target ${{ github.sha }} --prerelease --title "Sovereign $VER (beta, build ${{ github.run_number }})" \
+            --notes "Personal beta build for Android. Download the APK on your phone and open it to install. Built from ${{ github.sha }}."
