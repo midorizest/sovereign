@@ -1,4 +1,4 @@
-# Sovereign — Cultivation & Mastery (v1.7 · Web + Chrome Extension)
+# Sovereign — Cultivation & Mastery (v1.8 · Web + Chrome Extension)
 
 A private, offline-capable practice tracker and teaching app for sexual energy cultivation.
 No account, no server, no tracking. Everything stays on the device.
@@ -35,6 +35,16 @@ No account, no server, no tracking. Everything stays on the device.
   - The player's visuals breathe slowly and never flash at the beat rate.
   - To add or change a preset, edit `SOV.SOUND.presets` in `js/content.js`.
   - **Recommended creator:** fill in `SOV.SOUND.credits` in `js/content.js` (name, url, note) to show a shout-out card with a link at the bottom of the Sound tab. It stays hidden while the url is empty.
+- **Privacy & security (v1.8):**
+  - Optional **App lock** (Settings › Privacy & security). It uses a passcode with auto-lock (when closed, or after 5 or 30 minutes away) and a lock button in the top bar.
+  - With the lock on, journal entries and drafts are stored **encrypted** with AES-256-GCM, using a key derived via PBKDF2-SHA-256 (600,000 iterations). The key exists only in memory while unlocked. In the extension, it's kept in Chrome's memory-only session storage for the auto-lock window. Code is in `js/security.js`.
+  - **Encrypted backups:** with the lock on, the whole export is encrypted. Importing asks for the passcode.
+  - After 5 wrong attempts there's a growing wait (30 s, doubling, up to 15 min), and it survives reloads.
+  - "Forgot passcode" removes the lock and erases only the encrypted journal.
+  - **Discreet notifications** are on by default.
+  - A **content security policy** blocks all outside resources and network requests: a meta tag on the web, plus the extension's manifest.
+  - Practice logs aren't encrypted, so reminders and streaks keep working in the background, but the whole app sits behind the lock screen.
+- **Fix:** the "Now playing" countdown on the Sound tab now updates every second.
 - **Guidance volume (v1.7):**
   - The bells and tones that guide breath, protocol steps and mala counts are about twice as loud by default (+7 dB), and the breath pacer's cues are louder still (about +13 dB).
   - A "Guidance volume" slider with a Test button sits in the breath pacer, the protocol timer and Settings › Guidance sounds. All three stay in sync.
@@ -174,14 +184,14 @@ extension/background.js        Toolbar → side panel; daily reminder; sound-ses
 extension/offscreen.html/.js   Hidden audio page so sound keeps playing when the panel closes
 build_extension.py             Builds dist/ from the shared source
 dist/sovereign-extension/      Built extension (Load unpacked this folder)
-dist/sovereign-extension-1.7.0.zip   Upload this to the Chrome Web Store
+dist/sovereign-extension-1.8.0.zip   Upload this to the Chrome Web Store
 privacy.html                   Privacy policy (publish it; the store requires a URL)
 STORE_LISTING.md               Every field for the store dashboard, ready to paste
 store-assets/                  Icon, 5 screenshots, promo tiles (exact required sizes)
 ```
 
 ## Testing the extension on your Chromebook
-1. Unzip `sovereign-extension-1.7.0.zip` into a folder in *My files › Downloads*.
+1. Unzip `sovereign-extension-1.8.0.zip` into a folder in *My files › Downloads*.
 2. In Chrome, go to `chrome://extensions` and turn on **Developer mode** (top right).
 3. Click **Load unpacked** and select the unzipped folder (the one containing `manifest.json`).
 4. Pin Sovereign: click the puzzle-piece icon in the toolbar, then the pin next to Sovereign.

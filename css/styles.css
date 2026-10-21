@@ -154,7 +154,7 @@ button { cursor: pointer; }
 
 .field { display: block; margin-bottom: 18px; }
 .field-label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }
-input[type="text"], input[type="time"], input[type="number"], input[type="search"], textarea, select {
+input[type="text"], input[type="password"], input[type="time"], input[type="number"], input[type="search"], textarea, select {
   width: 100%; background: var(--card-2); border: 1px solid var(--line);
   border-radius: var(--radius-sm); padding: 12px 14px; min-height: 44px;
   transition: border-color .2s;
@@ -647,7 +647,7 @@ p, li { text-wrap: pretty; }
 .practice.done .practice-check { transform: scale(1.04); }
 .chip { border-color: var(--hairline); transition: background .3s var(--ease), border-color .3s var(--ease), transform .2s var(--ease); }
 .chip:active { transform: scale(.96); }
-input[type="text"], input[type="time"], input[type="number"], input[type="search"], textarea, select { border-color: var(--hairline); }
+input[type="text"], input[type="password"], input[type="time"], input[type="number"], input[type="search"], textarea, select { border-color: var(--hairline); }
 
 /* --- Buttons: lit gold primary, springy press, "button-in-button" CTA arrow --- */
 .btn { border-color: rgba(201, 169, 97, .38); transition: background .35s var(--ease), border-color .35s var(--ease), transform .35s var(--ease), box-shadow .35s var(--ease); }
@@ -743,3 +743,11 @@ dialog { border-color: var(--hairline); box-shadow: var(--shadow-lift), var(--be
 .cue-test { font-size: .88rem; flex: none; }
 .setting-group .cue-vol { margin: 0 0 12px; max-width: none; }
 #timer-cue-slot, #pacer-cue-slot { width: 100%; }
+
+/* --- v1.8: lock screen & security --- */
+.lockscreen { position: fixed; inset: 0; z-index: 90; background: var(--ambient), var(--bg); overflow-y: auto; }
+.lock-form { text-align: left; margin-bottom: 10px; }
+.lock-form input { font-size: 1.15rem; letter-spacing: .12em; }
+.lockscreen .link-btn { margin-top: 6px; }
+.sec-status { display: flex; align-items: center; gap: 10px; margin: 0; font-size: .92rem; }
+.sec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 10px var(--gold); flex: none; }

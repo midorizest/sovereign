@@ -81,12 +81,16 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   if (alarm.name === ALARM) {
     if (!practicedToday(s)) {
-      notify(ALARM, "Sovereign", "Your practice time has arrived. Five minutes is enough to begin.", om);
+      notify(ALARM, "Sovereign", s.settings?.discreet === false ? "Your practice time has arrived. Five minutes is enough to begin." : "A gentle reminder from Sovereign.", om);
     }
     scheduleReminder(); // tomorrow
   } else {
     const f = s.days?.[dateKey()]?.focus;
-    if (f?.remindAt && !f.done) notify(FOCUS_ALARM, "Today’s focus", `${f.title}. ${f.cue}`, om);
+    if (f?.remindAt && !f.done) {
+      // Discreet by default: nothing personal on the lock screen or in the notification centre.
+      if (s.settings?.discreet === false) notify(FOCUS_ALARM, "Today’s focus", `${f.title}. ${f.cue}`, om);
+      else notify(FOCUS_ALARM, "Sovereign", "A gentle reminder from Sovereign.", om);
+    }
   }
 });
 

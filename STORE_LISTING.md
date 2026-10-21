@@ -1,11 +1,11 @@
-# Chrome Web Store Submission — Sovereign v1.6.0
+# Chrome Web Store Submission — Sovereign v1.8.0
 
 Copy each field below into the Chrome Web Store Developer Dashboard (chrome.google.com/webstore/devconsole). Everything here matches what the extension actually does, which is what reviewers check.
 
 ---
 
 ## 1. Package
-Upload: `sovereign-extension-1.6.0.zip` (the zip itself, not unzipped)
+Upload: `sovereign-extension-1.8.0.zip` (the zip itself, not unzipped)
 
 ## 2. Store listing tab
 
@@ -47,6 +47,8 @@ Upload: `sovereign-extension-1.6.0.zip` (the zip itself, not unzipped)
 > PRIVATE BY DESIGN
 > • No account, no sign-in, no servers, no analytics, no ads
 > • Everything is stored only on your device
+> • Optional App lock with a passcode: your journal and backups are encrypted (AES-256)
+> • Discreet notifications that never show personal details
 > • Export and import your data as a backup file at any time
 >
 > Sound sessions are aids to relaxation and focus, not treatments. Use headphones at a low volume, and don't listen while driving.
@@ -125,7 +127,7 @@ Then tick all three certifications:
 **Pricing:** free. Chrome Web Store payments are no longer offered; if you charge for the program, do it outside the store.
 
 ## 5. Notes for the reviewer (optional field; paste this)
-> No account or login is needed. On first open, read and accept the disclaimer, then choose a track (Men or Women), a level (choose "Advanced" to see all content, including the advanced protocols and lessons), and a name. The side panel opens from the toolbar icon. The arrow icon at the top opens the full view in a tab. Settings (gear icon) holds export, import and reset. Sound sessions are under Protocols › Sound. The extension stores data only in chrome.storage.local and makes no network requests.
+> No account or login is needed. (App lock is optional and off by default.) On first open, read and accept the disclaimer, then choose a track (Men or Women), a level (choose "Advanced" to see all content, including the advanced protocols and lessons), and a name. The side panel opens from the toolbar icon. The arrow icon at the top opens the full view in a tab. Settings (gear icon) holds export, import and reset. Sound sessions are under Protocols › Sound. The extension stores data only in chrome.storage.local and makes no network requests.
 
 ---
 

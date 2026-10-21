@@ -8,6 +8,10 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
+  <!-- Strict content policy: only Sovereign's own files may load; nothing can be
+       fetched from or sent to any other site. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Sovereign</title>
   <meta name="description" content="A private practice tracker and teaching tool for sexual energy cultivation.">
@@ -19,6 +23,7 @@
   <link rel="preload" href="fonts/cormorant-garamond.woff" as="font" type="font/woff" crossorigin>
   <link rel="stylesheet" href="css/styles.css">
   <!-- Scripts are deferred so they never block first paint. -->
+  <script src="js/security.js" defer></script>
   <script src="js/content.js" defer></script>
   <script src="js/protocols.js" defer></script>
   <script src="js/sound-engine.js" defer></script>
@@ -100,6 +105,26 @@
   </section>
 
   <!-- ============================================================
+       LOCK SCREEN (only when App lock is on)
+       ============================================================ -->
+  <section id="lockscreen" class="onboarding lockscreen" hidden aria-labelledby="lock-title">
+    <div class="ob-inner">
+      <div class="sigil" aria-hidden="true"></div>
+      <p class="eyebrow">Sovereign</p>
+      <h1 id="lock-title" class="ob-title">Welcome back</h1>
+      <form id="lock-form" class="lock-form" autocomplete="off">
+        <label class="field" style="text-align:left">
+          <span class="field-label">Passcode</span>
+          <input type="password" id="lock-input" autocomplete="current-password" maxlength="128" required>
+        </label>
+        <button class="btn btn-primary btn-block btn-cta" type="submit" id="lock-submit">Unlock</button>
+      </form>
+      <p class="hint" id="lock-msg" aria-live="polite"></p>
+      <button class="link-btn" type="button" id="lock-forgot">Forgot passcode?</button>
+    </div>
+  </section>
+
+  <!-- ============================================================
        MAIN APP SHELL
        ============================================================ -->
   <div id="app" class="app" hidden>
@@ -109,6 +134,9 @@
         <p class="greeting" id="greeting"></p>
       </div>
       <div class="topbar-actions">
+      <button class="icon-btn" id="lock-now" aria-label="Lock Sovereign" title="Lock now" hidden>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
       <button class="icon-btn" id="open-full" aria-label="Open full view" title="Open full view" hidden>
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>

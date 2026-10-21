@@ -24,7 +24,7 @@
 (() => {
   "use strict";
   const C = window.SOV; // content from content.js
-  const APP_VERSION = "1.7.0";
+  const APP_VERSION = "1.8.0";
   const STORAGE_KEY = "sovereign.v1";
 
   /* Platform: the same code runs as a website/PWA and as a Chrome extension.
@@ -80,10 +80,174 @@
     milestonesSeen: [],
     settings: { theme: "dark" },
     meta: { lastExport: null, backupDismissed: null, lastNotified: null },
-    draft: ""
+    draft: "",
+    security: null   // { enabled, salt, iter, check, autoLock, fails, waitUntil } when App lock is on
   });
 
   let state = blankState(); // filled in by loadState() during boot
+
+  /* ========================================================================
+     SECURITY — App lock, encrypted journal, encrypted backups
+     With App lock on, journal entries and drafts are stored encrypted
+     (AES-256-GCM, key derived from the passcode with PBKDF2). The key lives
+     only in memory while Sovereign is unlocked. Practice logs stay readable
+     so reminders and streaks keep working, but the whole app sits behind
+     the lock screen, and backups are encrypted in full.
+     ======================================================================== */
+  let KEY = null;               // CryptoKey while unlocked
+  const PLAIN = new Map();      // decrypted journal entries: id → { prompt, text }
+  let draftPlain = "";
+  let unlockedOnce = false;
+  const secOn = () => !!state.security?.enabled;
+  const GRACE_KEY = "sovereign.grace";
+
+  function entryView(j) {
+    if (!j.enc) return j;
+    return { ...j, ...(PLAIN.get(j.id) || { prompt: "", text: "Locked entry" }) };
+  }
+  async function decryptJournal() {
+    if (!KEY) return;
+    for (const j of state.journal) {
+      if (j.enc && !PLAIN.has(j.id)) {
+        try { PLAIN.set(j.id, await SovSecure.decryptJSON(KEY, j.enc)); } catch (_) { PLAIN.set(j.id, { prompt: "", text: "This entry could not be decrypted." }); }
+      }
+    }
+    if (state.draftEnc) { try { draftPlain = await SovSecure.decryptText(KEY, state.draftEnc); } catch (_) { draftPlain = ""; } }
+  }
+  /** Encrypt every plain journal entry and the draft with `key` (used when turning the lock on or changing it). */
+  async function encryptJournalWith(key) {
+    const out = [];
+    for (const j of state.journal) {
+      const plain = j.enc ? PLAIN.get(j.id) : { prompt: j.prompt || "", text: j.text || "" };
+      if (!plain) { out.push(j); continue; }
+      PLAIN.set(j.id, plain);
+      out.push({ id: j.id, date: j.date, ts: j.ts, enc: await SovSecure.encryptJSON(key, plain) });
+    }
+    state.journal = out;
+    const d = state.draftEnc ? draftPlain : state.draft;
+    draftPlain = d || "";
+    state.draftEnc = draftPlain ? await SovSecure.encryptText(key, draftPlain) : null;
+    state.draft = "";
+  }
+  function decryptedJournalPlain() {
+    return state.journal.map((j) => j.enc ? { id: j.id, date: j.date, ts: j.ts, ...(PLAIN.get(j.id) || { prompt: "", text: "" }) } : j);
+  }
+
+  /* Extension: keep the unlocked key in Chrome's memory-only session storage
+     for the chosen auto-lock window, so reopening the side panel doesn't ask
+     again every time. It is never written to disk and is cleared when Chrome
+     closes, when you lock, or when the window expires. */
+  async function setGrace() {
+    if (!EXT || !KEY || !chrome.storage.session) return;
+    const mins = Number(state.security?.autoLock ?? 5);
+    if (mins <= 0) return clearGrace();
+    try { await chrome.storage.session.set({ [GRACE_KEY]: { key: await SovSecure.exportKey(KEY), until: Date.now() + mins * 60000 } }); } catch (_) {}
+  }
+  async function clearGrace() { if (EXT && chrome.storage.session) { try { await chrome.storage.session.remove(GRACE_KEY); } catch (_) {} } }
+  async function useGrace() {
+    if (!EXT || !chrome.storage.session) return false;
+    try {
+      const g = (await chrome.storage.session.get(GRACE_KEY))[GRACE_KEY];
+      if (!g || g.until < Date.now()) { await clearGrace(); return false; }
+      const key = await SovSecure.importKey(g.key);
+      await SovSecure.decryptText(key, state.security.check); // confirm it matches the current lock
+      KEY = key; return true;
+    } catch (_) { await clearGrace(); return false; }
+  }
+
+  /* ---- Lock screen ---- */
+  function showLock() {
+    // Close anything open first: a running protocol stops, the breath pacer or
+    // mala logs what was done, and a Sound session keeps playing.
+    const d = $("#dialog"); if (d.open) d.close();
+    try { if (!$("#timer").hidden) stopTimer(); } catch (_) {}
+    try { if (!$("#pacer").hidden) closePacer(); } catch (_) {}
+    try { if (!$("#sound-player").hidden) closeSoundPlayer(); } catch (_) {}
+    try { if (!$("#settings").hidden) closeOverlay($("#settings")); } catch (_) {}
+    KEY = null; PLAIN.clear(); draftPlain = "";
+    clearGrace();
+    $("#app").inert = true; $("#app").hidden = true;
+    const ta = $("#journal-text"); if (ta) ta.value = "";
+    $("#entries-list") && ($("#entries-list").innerHTML = "");
+    $("#lockscreen").hidden = false;
+    $("#lock-input").value = ""; $("#lock-msg").textContent = "";
+    updateLockWait();
+    setTimeout(() => $("#lock-input").focus(), 50);
+  }
+  function lockWaitLeft() { return Math.max(0, (state.security?.waitUntil || 0) - Date.now()); }
+  let waitTimer;
+  function updateLockWait() {
+    clearInterval(waitTimer);
+    const tick = () => {
+      const left = lockWaitLeft();
+      $("#lock-submit").disabled = left > 0; $("#lock-input").disabled = left > 0;
+      if (left > 0) $("#lock-msg").textContent = `Too many attempts. Try again in ${Math.ceil(left / 1000)} s.`;
+      else { clearInterval(waitTimer); if (/Too many/.test($("#lock-msg").textContent)) $("#lock-msg").textContent = ""; $("#lock-input").focus(); }
+    };
+    tick(); if (lockWaitLeft() > 0) waitTimer = setInterval(tick, 1000);
+  }
+  async function tryUnlock(e) {
+    e.preventDefault();
+    if (lockWaitLeft() > 0) return;
+    const pass = $("#lock-input").value;
+    if (!pass) return;
+    $("#lock-submit").disabled = true; $("#lock-msg").textContent = "Unlocking…";
+    const key = await SovSecure.unlock(pass, state.security);
+    $("#lock-input").value = "";
+    if (!key) {
+      const fails = (state.security.fails || 0) + 1;
+      state.security.fails = fails;
+      // After 5 wrong tries: wait 30 s, doubling each time, up to 15 min.
+      if (fails >= 5) state.security.waitUntil = Date.now() + Math.min(900000, 30000 * 2 ** (fails - 5));
+      save();
+      $("#lock-msg").textContent = fails >= 5 ? "" : "That passcode didn't match.";
+      $("#lock-submit").disabled = false;
+      updateLockWait();
+      return;
+    }
+    KEY = key;
+    state.security.fails = 0; state.security.waitUntil = 0; save();
+    await afterUnlock();
+  }
+  async function afterUnlock() {
+    await decryptJournal();
+    await setGrace();
+    $("#lockscreen").hidden = true;
+    $("#app").hidden = false; $("#app").inert = false;
+    if (!appStarted) startApp(); else render();
+    unlockedOnce = true;
+  }
+  async function forgotPasscode() {
+    const v = await dialog({
+      title: "Forgot your passcode?",
+      html: `<p>Your passcode can't be recovered — it's never stored anywhere, which is what keeps your journal private.</p>
+             <p>You can remove the lock. <strong>Your encrypted journal entries will be permanently erased.</strong> Your practice history, streaks and settings stay.</p>
+             <p class="muted">If you have an encrypted backup, you'll still need the passcode you used when you made it.</p>
+             <label class="field"><span class="field-label">Type ERASE to confirm</span><input type="text" id="forgot-confirm" autocomplete="off"></label>`,
+      actions: [{ label: "Cancel", value: "no" }, { label: "Erase journal & remove lock", value: "yes", danger: true }],
+      read: () => $("#forgot-confirm").value
+    });
+    if (v.value !== "yes" || v.read.trim().toUpperCase() !== "ERASE") return;
+    state.journal = state.journal.filter((j) => !j.enc);
+    state.draftEnc = null; state.draft = "";
+    state.security = null;
+    save(); await clearGrace();
+    toast("Lock removed. Your journal was erased.");
+    $("#lockscreen").hidden = true; $("#app").hidden = false; $("#app").inert = false;
+    if (!appStarted) startApp(); else render();
+  }
+
+  /* Auto-lock: when Sovereign has been hidden or closed for the chosen time. */
+  let hiddenAt = 0;
+  function bindAutoLock() {
+    document.addEventListener("visibilitychange", () => {
+      if (!secOn() || !KEY) return;
+      const mins = Number(state.security.autoLock ?? 5);
+      if (document.visibilityState === "hidden") { hiddenAt = Date.now(); if (mins <= 0) showLock(); }
+      else if (hiddenAt && Date.now() - hiddenAt >= mins * 60000) showLock();
+      else setGrace();
+    });
+  }
 
   /** Load saved data. Extension: chrome.storage.local (with one-time migration
       from localStorage). Website: localStorage. */
@@ -138,9 +302,11 @@
       const next = changes[STORAGE_KEY].newValue;
       if (!next || !next.profile) { location.reload(); return; }   // reset elsewhere
       if (!appStarted) { location.reload(); return; }               // onboarding finished elsewhere
+      if ((next.security?.salt || "") !== (state.security?.salt || "")) { location.reload(); return; } // lock turned on/off/changed elsewhere
       state = normalise(next);
       applyTheme();
-      if ($("#settings").hidden) render();
+      if (secOn() && !KEY) return;                                   // locked: show nothing
+      decryptJournal().then(() => { if ($("#settings").hidden) render(); });
     });
   }
   /** Get (and optionally create) a day record. */
@@ -319,6 +485,7 @@
   function renderHeader() {
     const h = new Date().getHours();
     const part = h < 5 ? "Still hours" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+    $("#lock-now").hidden = !secOn();
     $("#today-label").textContent = fmtLongDate(new Date());
     $("#greeting").textContent = `${part}, ${state.profile.name}`;
   }
@@ -1458,20 +1625,45 @@
     render(); checkMilestones();
   }
 
+  /* "Now playing" card on the Sound tab. Rendered once, then a 1-second
+     ticker updates only the time, so the countdown moves without the card
+     being rebuilt (which would steal focus or flicker). The ticker stops by
+     itself when you leave the Sound tab or the session ends. */
+  let npTicker = null, npState = "";
   async function refreshNowPlaying() {
     const el = $("#now-playing");
-    if (!el) return;
+    if (!el) { stopNowPlaying(); return; }
     const st = await sndEngine.status();
     const paused = SND.paused;
     const id = st?.presetId || paused?.preset.id;
-    if (!id) { el.innerHTML = ""; return; }
-    const p = presetById(id);
-    el.innerHTML = `<button class="card now-playing" data-sound="${id}">
-      <span class="np-dot ${st ? "on" : ""}" aria-hidden="true"></span>
-      <span><span class="eyebrow" style="display:block;margin:0">${st ? "Now playing" : "Paused"}</span>
-      <span class="sound-name">${esc(p.name)}</span></span>
-      <span class="muted small">${st ? fmtTime(Math.max(0, Math.ceil(st.total - st.elapsed))) + " left" : "Tap to resume"}</span></button>`;
+    const key = id ? `${id}:${st ? "on" : "paused"}` : "";
+    if (!id) { el.innerHTML = ""; npState = ""; stopNowPlaying(); return; }
+    if (key !== npState || !el.firstElementChild) {
+      const p = presetById(id);
+      el.innerHTML = `<button class="card now-playing" data-sound="${id}">
+        <span class="np-dot ${st ? "on" : ""}" aria-hidden="true"></span>
+        <span><span class="eyebrow" style="display:block;margin:0">${st ? "Now playing" : "Paused"}</span>
+        <span class="sound-name">${esc(p.name)}</span></span>
+        <span class="muted small np-time"></span></button>`;
+      npState = key;
+    }
+    const timeEl = el.querySelector(".np-time");
+    if (st) {
+      const left = Math.max(0, Math.ceil(st.total - st.elapsed));
+      timeEl.textContent = `${fmtTime(left)} left`;
+      el.firstElementChild.setAttribute("aria-label", `Now playing ${presetById(id).name}, ${Math.floor(left / 60)} minutes left. Open player.`);
+      if (!npTicker) npTicker = setInterval(tickNowPlaying, 1000);
+    } else {
+      timeEl.textContent = paused ? `${fmtTime(Math.max(0, Math.ceil(paused.opts.minutes * 60 - paused.elapsed)))} left · tap to resume` : "Tap to resume";
+      stopNowPlaying();
+    }
   }
+  function tickNowPlaying() {
+    const visible = currentView === "protocols" && PTAB === "sound" && document.visibilityState === "visible" && $("#sound-player").hidden;
+    if (!visible) { stopNowPlaying(); return; }
+    refreshNowPlaying();
+  }
+  function stopNowPlaying() { clearInterval(npTicker); npTicker = null; }
 
   /* ---- Player overlay ---- */
   async function openSoundPlayer(id) {
@@ -1643,7 +1835,7 @@
   function renderJournal() {
     $("#journal-prompt").textContent = C.PROMPTS[dayIndex() % C.PROMPTS.length];
     const ta = $("#journal-text");
-    if (document.activeElement !== ta) ta.value = state.draft || "";
+    if (document.activeElement !== ta) ta.value = secOn() ? draftPlain : (state.draft || "");
     renderCalendar();
     renderEntries();
   }
@@ -1681,7 +1873,7 @@
     entries.sort((a, b) => b.ts.localeCompare(a.ts));
     $("#entries-title").textContent = title;
     $("#entries-list").innerHTML = entries.length
-      ? entries.map((j) => `<article class="card entry">
+      ? entries.map((j) => entryView(j)).map((j) => `<article class="card entry">
           <time datetime="${j.ts}">${new Date(j.ts).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
           ${j.prompt ? `<p class="entry-prompt">${esc(j.prompt)}</p>` : ""}
           <p class="entry-text">${esc(j.text)}</p>
@@ -1693,20 +1885,27 @@
     let draftTimer;
     $("#journal-text").addEventListener("input", (e) => {
       clearTimeout(draftTimer);
-      draftTimer = setTimeout(() => { state.draft = e.target.value; save(); $("#journal-status").textContent = "Draft saved"; }, 500);
+      draftTimer = setTimeout(async () => {
+        if (secOn() && KEY) { draftPlain = e.target.value; state.draftEnc = draftPlain ? await SovSecure.encryptText(KEY, draftPlain) : null; state.draft = ""; }
+        else state.draft = e.target.value;
+        save(); $("#journal-status").textContent = secOn() ? "Draft saved · encrypted" : "Draft saved";
+      }, 500);
     });
-    $("#journal-save").addEventListener("click", () => {
+    $("#journal-save").addEventListener("click", async () => {
       const text = $("#journal-text").value.trim();
       if (!text) { toast("Write something first."); $("#journal-text").focus(); return; }
       clearTimeout(draftTimer); // stop a pending draft-save from restoring the old text
       const now = new Date();
-      state.journal.push({
+      const entry = {
         id: `${now.getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-        date: dateKey(now), ts: now.toISOString(),
-        prompt: $("#journal-prompt").textContent, text
-      });
+        date: dateKey(now), ts: now.toISOString()
+      };
+      const content = { prompt: $("#journal-prompt").textContent, text };
+      if (secOn() && KEY) { entry.enc = await SovSecure.encryptJSON(KEY, content); PLAIN.set(entry.id, content); }
+      else Object.assign(entry, content);
+      state.journal.push(entry);
       const first = state.journal.filter((j) => j.date === dateKey(now)).length === 1;
-      state.draft = "";
+      state.draft = ""; state.draftEnc = null; draftPlain = "";
       save();
       $("#journal-text").value = "";
       $("#journal-status").textContent = "";
@@ -1744,6 +1943,10 @@
      11. SETTINGS — profile, theme, export / import / reset
      ======================================================================== */
   function openSettings() {
+    renderSettingsBody();
+    if ($("#settings").hidden) openOverlay($("#settings"), closeSettings);
+  }
+  function renderSettingsBody() {
     const p = state.profile;
     const seg = (name, opts, cur) => `<div class="seg" role="group" aria-label="${name}">${opts.map(([v, l]) =>
       `<button class="chip" data-set="${name}" data-val="${v}" aria-pressed="${cur === v}">${l}</button>`).join("")}</div>`;
@@ -1768,6 +1971,17 @@
         ${seg("duckSessions", [["on", "Dip frequencies during cues"], ["off", "Keep frequencies steady"]], state.settings.duckSessions === false ? "off" : "on")}
         <p class="hint" style="margin-top:10px">The bells and tones that guide breath, protocol steps and mala counts. When a Sound session is playing, it can dip for a moment so each cue is easy to hear. To change the frequencies themselves, use the volume slider in the Sound player.</p></div>
       <div class="setting-group"><h3>Appearance</h3>${seg("theme", [["dark", "Dark"], ["light", "Light"]], state.settings.theme)}</div>
+      <div class="setting-group"><h3>Privacy &amp; security</h3>
+        ${secOn() ? `
+          <p class="sec-status"><span class="sec-dot" aria-hidden="true"></span> App lock is on · journal and backups encrypted</p>
+          <p class="field-label" style="margin:12px 0 6px">Lock automatically</p>
+          ${seg("autoLock", [["0", "When closed"], ["5", "After 5 min"], ["30", "After 30 min"]], String(state.security.autoLock ?? 5))}
+          <div class="btn-row" style="margin-top:12px"><button class="btn" id="sec-change">Change passcode</button><button class="btn" id="sec-off">Turn off lock</button></div>`
+        : `<p class="hint" style="margin-top:0">Protect Sovereign with a passcode. Your journal and drafts are then stored encrypted, and backups are encrypted too.</p>
+          <button class="btn btn-primary" id="sec-on">Turn on App lock</button>`}
+        <p class="field-label" style="margin:16px 0 6px">Reminder notifications</p>
+        ${seg("discreet", [["on", "Discreet"], ["off", "Show details"]], state.settings.discreet === false ? "off" : "on")}
+        <p class="hint" style="margin-top:10px">Discreet notifications say only "A gentle reminder from Sovereign", so nothing personal appears on your screen. Sovereign never sends your data anywhere and can't load anything from the internet.</p></div>
       <div class="setting-group"><h3>Your data</h3>
         <p class="hint">Everything is stored only in this browser. Clearing browser data will erase it.
         ${state.meta.lastExport ? `Last backup: ${new Date(state.meta.lastExport).toLocaleDateString()}.` : "<strong>No backup yet.</strong>"}</p>
@@ -1781,7 +1995,6 @@
       <div class="setting-group"><h3>Danger zone</h3>
         <button class="btn btn-danger" id="set-reset">Reset all data</button></div>
       <p class="version">Sovereign v${APP_VERSION} · Stored on this device only</p>`;
-    openOverlay($("#settings"), closeSettings);
   }
   function closeSettings() { closeOverlay($("#settings")); render(); }
 
@@ -1800,13 +2013,18 @@
         else if (set === "reminders") state.settings.reminders = val === "on";
         else if (set === "reminderSound") state.settings.reminderSound = val;
         else if (set === "duckSessions") state.settings.duckSessions = val === "on";
+        else if (set === "discreet") state.settings.discreet = val === "on";
+        else if (set === "autoLock") { state.security.autoLock = Number(val); setGrace(); }
         else state.profile[set] = val;
         save();
         $$(`[data-set="${set}"]`, body).forEach((x) => x.setAttribute("aria-pressed", x.dataset.val === val));
-        toast(set === "duckSessions" ? (val === "on" ? "Frequencies will dip during cues" : "Frequencies stay steady") : set === "reminders" ? `Reminders ${val}` : set === "reminderSound" ? `Reminder sound: ${cap(val)}` : `${cap(set)} set to ${cap(val)}`);
+        toast(set === "discreet" ? (val === "on" ? "Notifications are discreet" : "Notifications show details") : set === "autoLock" ? (val === "0" ? "Locks whenever Sovereign is closed" : `Locks after ${val} minutes away`) : set === "duckSessions" ? (val === "on" ? "Frequencies will dip during cues" : "Frequencies stay steady") : set === "reminders" ? `Reminders ${val}` : set === "reminderSound" ? `Reminder sound: ${cap(val)}` : `${cap(set)} set to ${cap(val)}`);
       }
       if (b.id === "set-om-preview") { b.disabled = true; SovSound.playOm(0.8).finally(() => (b.disabled = false)); }
       if (b.id === "set-export") exportData();
+      if (b.id === "sec-on") enableLock();
+      if (b.id === "sec-change") changeLock();
+      if (b.id === "sec-off") disableLock();
       if (b.id === "set-import") $("#set-import-file").click();
       if (b.id === "set-disclaimer") dialog({ title: "Disclaimer", html: `<div class="disclaimer" style="max-height:60vh">${C.DISCLAIMER}</div>`, actions: [{ label: "Close", value: "x", primary: true }] });
       if (b.id === "set-reset") resetData();
@@ -1821,8 +2039,75 @@
     });
   }
 
-  function exportData() {
-    const payload = { app: "sovereign", version: APP_VERSION, exportedAt: new Date().toISOString(), data: state };
+  /* ---- App lock settings ---- */
+  const passFields = (labels) => labels.map(([id, label, ac]) =>
+    `<label class="field"><span class="field-label">${label}</span><input type="password" id="${id}" autocomplete="${ac}" maxlength="128"></label>`).join("");
+  async function askNewPasscode(title, intro) {
+    const v = await dialog({
+      title,
+      html: `<p class="muted">${intro}</p>${passFields([["pass-new", "New passcode (at least 4 characters)", "new-password"], ["pass-confirm", "Confirm passcode", "new-password"]])}
+             <p class="hint">A phrase of several words is far stronger than a 4-digit PIN. It can't be recovered if forgotten.</p>`,
+      actions: [{ label: "Cancel", value: "no" }, { label: "Save passcode", value: "yes", primary: true }],
+      read: () => [$("#pass-new").value, $("#pass-confirm").value]
+    });
+    if (v.value !== "yes") return null;
+    const [a, b] = v.read;
+    if (a.length < 4) { toast("Use at least 4 characters."); return null; }
+    if (a !== b) { toast("The passcodes didn't match."); return null; }
+    return a;
+  }
+  async function confirmCurrent(title) {
+    const v = await dialog({ title, html: passFields([["pass-cur", "Current passcode", "current-password"]]),
+      actions: [{ label: "Cancel", value: "no" }, { label: "Continue", value: "yes", primary: true }], read: () => $("#pass-cur").value });
+    if (v.value !== "yes") return false;
+    const ok = await SovSecure.unlock(v.read, state.security);
+    if (!ok) toast("That passcode didn't match.");
+    return !!ok;
+  }
+  async function applyNewPasscode(pass) {
+    toast("Encrypting…");
+    const { record, key } = await SovSecure.createLock(pass);
+    if (state.security?.enabled && KEY) await decryptJournal();
+    await encryptJournalWith(key);
+    state.security = { ...record, autoLock: state.security?.autoLock ?? 5, fails: 0, waitUntil: 0 };
+    KEY = key;
+    save(); await setGrace();
+  }
+  async function enableLock() {
+    const pass = await askNewPasscode("Turn on App lock", "Choose a passcode to open Sovereign. Your journal and drafts will be stored encrypted.");
+    if (!pass) return;
+    await applyNewPasscode(pass);
+    toast("App lock is on");
+    openSettings(); $("#lock-now").hidden = false;
+  }
+  async function changeLock() {
+    if (!(await confirmCurrent("Change passcode"))) return;
+    const pass = await askNewPasscode("New passcode", "Your journal will be re-encrypted with the new passcode.");
+    if (!pass) return;
+    await applyNewPasscode(pass);
+    toast("Passcode changed");
+    openSettings();
+  }
+  async function disableLock() {
+    if (!(await confirmCurrent("Turn off App lock"))) return;
+    await decryptJournal();
+    state.journal = decryptedJournalPlain();
+    state.draft = draftPlain; state.draftEnc = null;
+    state.security = null; KEY = null; PLAIN.clear();
+    save(); await clearGrace();
+    $("#lock-now").hidden = true;
+    toast("App lock is off. Your journal is no longer encrypted.");
+    openSettings();
+  }
+
+  async function exportData() {
+    let payload = { app: "sovereign", version: APP_VERSION, exportedAt: new Date().toISOString(), data: state };
+    // With App lock on, the whole backup is encrypted with the passcode.
+    if (secOn() && KEY) {
+      const box = await SovSecure.encryptJSON(KEY, state);
+      payload = { app: "sovereign", version: APP_VERSION, exportedAt: payload.exportedAt, encrypted: true,
+        salt: state.security.salt, iter: state.security.iter, check: state.security.check, ...box };
+    }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -1832,13 +2117,27 @@
     state.meta.lastExport = new Date().toISOString();
     save();
     if (currentView === "home") renderBanners();
-    toast("Backup saved to your Downloads folder");
+    toast(secOn() ? "Encrypted backup saved to your Downloads folder" : "Backup saved to your Downloads folder");
   }
 
   async function importData(file) {
     try {
       const parsed = JSON.parse(await file.text());
-      const data = parsed.app === "sovereign" ? parsed.data : null;
+      if (parsed.app !== "sovereign") throw new Error("not a Sovereign backup");
+      let data = parsed.data, importKey = null;
+      if (parsed.encrypted) {
+        const v = await dialog({
+          title: "Encrypted backup",
+          html: `<p>This backup is protected. Enter the passcode that was in use when it was made.</p>
+                 <label class="field"><span class="field-label">Passcode</span><input type="password" id="import-pass" autocomplete="off"></label>`,
+          actions: [{ label: "Cancel", value: "no" }, { label: "Unlock backup", value: "yes", primary: true }],
+          read: () => $("#import-pass").value
+        });
+        if (v.value !== "yes") return;
+        importKey = await SovSecure.unlock(v.read, { salt: parsed.salt, iter: parsed.iter, check: parsed.check });
+        if (!importKey) { dialog({ title: "Wrong passcode", html: "<p class='muted'>That passcode doesn't open this backup.</p>", actions: [{ label: "OK", value: "ok", primary: true }] }); return; }
+        data = await SovSecure.decryptJSON(importKey, parsed);
+      }
       if (!data || !data.profile) throw new Error("not a Sovereign backup");
       const v = await dialog({
         title: "Replace current data?",
@@ -1848,6 +2147,9 @@
       });
       if (v !== "yes") return;
       state = normalise(data);
+      PLAIN.clear(); draftPlain = "";
+      KEY = secOn() ? importKey : null;
+      if (KEY) { await decryptJournal(); await setGrace(); }
       save(); applyTheme();
       closeSettings();
       go("home");
@@ -1870,6 +2172,7 @@
     if (v.value === "yes" && v.read.trim().toUpperCase() === "RESET") {
       try { localStorage.removeItem(STORAGE_KEY); } catch {}
       if (EXT) await chrome.storage.local.remove([STORAGE_KEY, "sovereign.writer"]).catch(() => {});
+      await clearGrace();
       location.reload();
     } else if (v.value === "yes") toast("Not reset — confirmation didn't match.");
   }
@@ -1958,7 +2261,7 @@
     const r = state.profile.reminder;
     if (r && hhmm >= r && state.meta.lastNotified !== tk && !practiced(tk)) {
       state.meta.lastNotified = tk; save();
-      if (!EXT) deliverReminder("Sovereign", "Your practice time has arrived. Five minutes is enough to begin.", "sovereign-reminder");
+      if (!EXT) deliverReminder("Sovereign", state.settings.discreet === false ? "Your practice time has arrived. Five minutes is enough to begin." : "A gentle reminder from Sovereign.", "sovereign-reminder");
       if (currentView === "home") renderBanners();
     }
 
@@ -1967,7 +2270,8 @@
     const f = day().focus;
     if (!EXT && f && f.remindAt && !f.done && !f.notified && hhmm >= f.remindAt) {
       f.notified = true; save();
-      deliverReminder("Today’s focus", `${f.title}. ${f.cue}`, "sovereign-focus");
+      deliverReminder(state.settings.discreet === false ? "Today’s focus" : "Sovereign",
+        state.settings.discreet === false ? `${f.title}. ${f.cue}` : "A gentle reminder from Sovereign.", "sovereign-focus");
       toast(`Today’s focus: ${f.title}`);
       if (currentView === "home") renderFocus();
     }
@@ -1985,6 +2289,8 @@
 
   function startApp() {
     appStarted = true;
+    $("#lock-now").hidden = !secOn();
+    $("#lock-now").addEventListener("click", () => { if (secOn()) showLock(); });
     $("#app").hidden = false;
     // Extension side panel: offer the roomier full-view tab.
     if (EXT && !IS_FULL) {
@@ -2003,6 +2309,7 @@
     let lastDay = todayKey();
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && todayKey() !== lastDay) { lastDay = todayKey(); render(); }
+      if (document.visibilityState === "visible" && currentView === "protocols" && PTAB === "sound") refreshNowPlaying();
     });
   }
 
@@ -2011,6 +2318,13 @@
     applyTheme();
     registerSW();
     watchOtherWindows();
+    $("#lock-form").addEventListener("submit", tryUnlock);
+    $("#lock-forgot").addEventListener("click", forgotPasscode);
+    bindAutoLock();
+    if (state.profile && secOn()) {
+      if (await useGrace()) await afterUnlock(); else showLock();
+      return;
+    }
     if (state.profile) startApp(); else startOnboarding();
   }
   boot();
