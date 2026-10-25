@@ -154,7 +154,7 @@ button { cursor: pointer; }
 
 .field { display: block; margin-bottom: 18px; }
 .field-label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 6px; }
-input[type="text"], input[type="password"], input[type="time"], input[type="number"], input[type="search"], textarea, select {
+input[type="text"], input[type="password"], input[type="time"], input[type="date"], input[type="number"], input[type="search"], textarea, select {
   width: 100%; background: var(--card-2); border: 1px solid var(--line);
   border-radius: var(--radius-sm); padding: 12px 14px; min-height: 44px;
   transition: border-color .2s;
@@ -647,7 +647,7 @@ p, li { text-wrap: pretty; }
 .practice.done .practice-check { transform: scale(1.04); }
 .chip { border-color: var(--hairline); transition: background .3s var(--ease), border-color .3s var(--ease), transform .2s var(--ease); }
 .chip:active { transform: scale(.96); }
-input[type="text"], input[type="password"], input[type="time"], input[type="number"], input[type="search"], textarea, select { border-color: var(--hairline); }
+input[type="text"], input[type="password"], input[type="time"], input[type="date"], input[type="number"], input[type="search"], textarea, select { border-color: var(--hairline); }
 
 /* --- Buttons: lit gold primary, springy press, "button-in-button" CTA arrow --- */
 .btn { border-color: rgba(201, 169, 97, .38); transition: background .35s var(--ease), border-color .35s var(--ease), transform .35s var(--ease), box-shadow .35s var(--ease); }
@@ -751,3 +751,79 @@ dialog { border-color: var(--hairline); box-shadow: var(--shadow-lift), var(--be
 .lockscreen .link-btn { margin-top: 6px; }
 .sec-status { display: flex; align-items: center; gap: 10px; margin: 0; font-size: .92rem; }
 .sec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 10px var(--gold); flex: none; }
+
+/* ==========================================================================
+   v1.10 — Daycycle
+   Ember (physical), sage (emotional) and gold (intellectual) on Sovereign's
+   dark ground; deeper tones in the light theme for contrast.
+   ========================================================================== */
+:root, [data-theme="dark"] { --cy-phy: #dc8d6b; --cy-emo: #93bba2; --cy-int: #c9a961; }
+[data-theme="light"] { --cy-phy: #a34f2d; --cy-emo: #3d7657; --cy-int: #7d6224; }
+
+.dc-card { box-shadow: var(--shadow), var(--bezel); margin: 0 6px 22px; }
+.dc-card h2 { font-size: 1.4rem; margin-bottom: 14px; }
+.dc-empty p:not(.eyebrow) { margin-bottom: 14px; }
+.dc-reads { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.dc-read { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dc-name { font-size: .78rem; color: var(--muted); letter-spacing: .02em; }
+.dc-val { font-family: var(--serif); font-size: 1.7rem; line-height: 1; color: var(--c); font-variant-numeric: lining-nums tabular-nums; }
+.dc-read.big .dc-val { font-size: 2.1rem; }
+.dc-state { font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.dc-state.turn { color: var(--danger); }
+.dc-state.peak, .dc-state.high { color: var(--text); }
+.dc-meter { position: relative; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 4px; }
+.dc-meter i { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: var(--c); }
+.dc-meter::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--muted); opacity: .6; }
+.dc-trend { font-size: .76rem; color: var(--muted); }
+.dc-reads.big { margin: 18px 0 6px; }
+.dc-phase { border-left: 2px solid var(--cy-emo); padding: 2px 0 2px 12px; margin: 14px 0 0; font-size: .92rem; color: var(--muted); }
+.dc-tomorrow { margin: 14px 0 0; font-size: .88rem; color: var(--muted); }
+.dc-tomorrow span { color: var(--gold); margin-right: 4px; }
+.dc-open { margin-top: 14px; }
+.dc-feel { margin-top: 16px; }
+.dc-feel .field-label { margin-bottom: 8px; }
+.dc-feel .seg { flex-wrap: wrap; }
+
+.dc-act { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 12px; width: 100%; text-align: left;
+  margin-top: 10px; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--card-2);
+  color: var(--text); font: inherit; cursor: pointer; transition: border-color .2s var(--ease), transform .2s var(--ease); }
+.dc-act:hover { border-color: var(--gold-line); }
+.dc-act:active { transform: scale(.99); }
+.dc-act.primary { border-color: var(--gold-line); background: var(--gold-soft); }
+.dc-act-label { font-weight: 600; font-size: .95rem; }
+.dc-act-sub { grid-column: 1; font-size: .78rem; color: var(--muted); }
+.dc-act-arrow { grid-column: 2; grid-row: 1 / span 2; color: var(--gold); font-size: 1.1rem; }
+
+.dc-head { font-family: var(--serif); font-weight: 500; font-size: 1.7rem; line-height: 1.15; margin: 4px 0 6px; }
+.dc-sec { font: 500 .74rem/1 var(--sans); letter-spacing: .18em; text-transform: uppercase; color: var(--gold); margin: 30px 0 14px; }
+.dc-plan { list-style: none; margin: 0 0 10px 6px; padding: 0; border-left: 1px solid var(--line); }
+.dc-plan li { position: relative; padding: 0 0 22px 22px; }
+.dc-plan li::before { content: ""; position: absolute; left: -6px; top: 4px; width: 11px; height: 11px; border-radius: 50%; background: var(--bg-elev); border: 2px solid var(--c); }
+.dc-when { display: block; font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dc-what { display: block; font-family: var(--serif); font-weight: 500; font-size: 1.25rem; margin: 2px 0 4px; }
+.dc-plan p { margin: 0; font-size: .93rem; color: var(--muted); max-width: 62ch; }
+
+.dc-chart { background: var(--card); border: 1px solid var(--hairline); border-radius: var(--radius-sm); padding: 10px 6px 8px; }
+.dc-chart svg { display: block; width: 100%; height: auto; }
+.dc-chart path { fill: none; stroke-width: 2; stroke-linecap: round; }
+.dc-chart circle { stroke: var(--card); stroke-width: 2; }
+.dc-axis line { stroke: var(--line); stroke-width: 1; }
+.dc-axis line.zero { stroke: var(--muted); stroke-opacity: .5; }
+.dc-axis text { fill: var(--muted); font: 9px var(--sans); }
+.dc-today { stroke: var(--gold); stroke-dasharray: 3 3; stroke-width: 1; }
+.dc-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 8px 0; font-size: .78rem; color: var(--muted); }
+.dc-legend span::before { content: ""; display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: var(--c); }
+
+.dc-up { margin: 0; }
+.dc-up div { display: grid; grid-template-columns: 7.5em 1fr; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--hairline); font-size: .92rem; }
+.dc-up dt { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dc-up dd { margin: 0; }
+.dc-disclaimer { margin-top: 30px; font-size: .8rem; color: var(--muted); }
+.dc-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.dc-fields .field { margin: 0; }
+
+@media (max-width: 380px) {
+  .dc-reads { gap: 8px; }
+  .dc-val { font-size: 1.45rem; }
+  .dc-fields { grid-template-columns: 1fr; }
+}

@@ -24,7 +24,7 @@
 (() => {
   "use strict";
   const C = window.SOV; // content from content.js
-  const APP_VERSION = "1.9.0";
+  const APP_VERSION = "1.10.0";
   const STORAGE_KEY = "sovereign.v1";
 
   /* Platform: the same code runs as a website/PWA and as a Chrome extension.
@@ -92,7 +92,10 @@
     settings: { theme: "dark" },
     meta: { lastExport: null, backupDismissed: null, lastNotified: null },
     draft: "",
-    security: null   // { enabled, salt, iter, check, autoLock, fails, waitUntil } when App lock is on
+    security: null,  // { enabled, salt, iter, check, autoLock, fails, waitUntil } when App lock is on
+    // Daycycle (optional): birth date is encrypted (dobEnc) when App lock is on.
+    // feel: evening check-ins (1–5); briefs: next days' reminder lines, kept only when notifications show details.
+    daycycle: { on: false, dob: "", dobEnc: null, wake: "07:00", feel: {}, briefs: {} }
   });
 
   let state = blankState(); // filled in by loadState() during boot
@@ -108,6 +111,7 @@
   let KEY = null;               // CryptoKey while unlocked
   const PLAIN = new Map();      // decrypted journal entries: id → { prompt, text }
   let draftPlain = "";
+  let DOB_PLAIN = "";            // decrypted Daycycle birth date while unlocked
   let unlockedOnce = false;
   const secOn = () => !!state.security?.enabled;
   const GRACE_KEY = "sovereign.grace";
@@ -124,6 +128,7 @@
       }
     }
     if (state.draftEnc) { try { draftPlain = await SovSecure.decryptText(KEY, state.draftEnc); } catch (_) { draftPlain = ""; } }
+    if (state.daycycle.dobEnc) { try { DOB_PLAIN = await SovSecure.decryptText(KEY, state.daycycle.dobEnc); } catch (_) { DOB_PLAIN = ""; } }
   }
   /** Encrypt every plain journal entry and the draft with `key` (used when turning the lock on or changing it). */
   async function encryptJournalWith(key) {
@@ -139,6 +144,10 @@
     draftPlain = d || "";
     state.draftEnc = draftPlain ? await SovSecure.encryptText(key, draftPlain) : null;
     state.draft = "";
+    const dob = state.daycycle.dobEnc ? DOB_PLAIN : state.daycycle.dob;
+    DOB_PLAIN = dob || "";
+    state.daycycle.dobEnc = dob ? await SovSecure.encryptText(key, dob) : null;
+    state.daycycle.dob = "";
   }
   function decryptedJournalPlain() {
     return state.journal.map((j) => j.enc ? { id: j.id, date: j.date, ts: j.ts, ...(PLAIN.get(j.id) || { prompt: "", text: "" }) } : j);
@@ -175,7 +184,7 @@
     try { if (!$("#pacer").hidden) closePacer(); } catch (_) {}
     try { if (!$("#sound-player").hidden) closeSoundPlayer(); } catch (_) {}
     try { if (!$("#settings").hidden) closeOverlay($("#settings")); } catch (_) {}
-    KEY = null; PLAIN.clear(); draftPlain = "";
+    KEY = null; PLAIN.clear(); draftPlain = ""; DOB_PLAIN = "";
     clearGrace();
     $("#app").inert = true; $("#app").hidden = true;
     const ta = $("#journal-text"); if (ta) ta.value = "";
@@ -232,7 +241,7 @@
     const v = await dialog({
       title: "Forgot your passcode?",
       html: `<p>Your passcode can't be recovered — it's never stored anywhere, which is what keeps your journal private.</p>
-             <p>You can remove the lock. <strong>Your encrypted journal entries will be permanently erased.</strong> Your practice history, streaks and settings stay.</p>
+             <p>You can remove the lock. <strong>Your encrypted journal entries will be permanently erased</strong>, along with your Daycycle birth date. Your practice history, streaks and settings stay.</p>
              <p class="muted">If you have an encrypted backup, you'll still need the passcode you used when you made it.</p>
              <label class="field"><span class="field-label">Type ERASE to confirm</span><input type="text" id="forgot-confirm" autocomplete="off"></label>`,
       actions: [{ label: "Cancel", value: "no" }, { label: "Erase journal & remove lock", value: "yes", danger: true }],
@@ -241,6 +250,7 @@
     if (v.value !== "yes" || v.read.trim().toUpperCase() !== "ERASE") return;
     state.journal = state.journal.filter((j) => !j.enc);
     state.draftEnc = null; state.draft = "";
+    state.daycycle.dobEnc = null; state.daycycle.briefs = {};
     state.security = null;
     save(); await clearGrace();
     toast("Lock removed. Your journal was erased.");
@@ -289,6 +299,7 @@
       ...b, ...s,
       settings: { ...b.settings, ...(s.settings || {}) },
       meta: { ...b.meta, ...(s.meta || {}) },
+      daycycle: { ...b.daycycle, ...(s.daycycle || {}) },
       days: s.days || {}, journal: Array.isArray(s.journal) ? s.journal : [],
       lessons: s.lessons || {}, milestonesSeen: s.milestonesSeen || []
     };
@@ -344,7 +355,7 @@
           const at = new Date(); at.setDate(at.getDate() + i); at.setHours(h, m, 0, 0);
           if (at <= now || (i === 0 && practiced(todayKey()))) continue;
           list.push({ id: 100 + i, title: "Sovereign", channelId, schedule: { at, allowWhileIdle: true },
-            body: discreet ? "A gentle reminder from Sovereign." : "Your practice time has arrived. Five minutes is enough to begin." });
+            body: dailyReminderBody(dateKey(at)), largeBody: dailyReminderBody(dateKey(at)) });
         }
       }
       const f = day().focus;
@@ -369,6 +380,7 @@
       if (!$("#pacer").hidden) { $("#pacer-close").click(); return; }
       if (!$("#sound-player").hidden) { $("#sp-close").click(); return; }
       if (!$("#settings").hidden) { closeSettings(); return; }
+      if (!$("#daycycle").hidden) { closeDaycycle(); return; }
       if (!$("#lesson-reader").hidden && currentView === "library") { renderLibrary(); return; }
       if (appStarted && currentView !== "home" && !$("#app").hidden) { go("home"); return; }
       App.exitApp();
@@ -616,6 +628,8 @@
     $("#practice-list").innerHTML = list.map((p) => practiceHTML(p, rec, key)).join("");
 
     renderFocus();
+    renderDaycycleCard();
+    if (refreshBriefs()) save();
 
     // Principle of the day
     const pr = C.PRINCIPLES[dayIndex() % C.PRINCIPLES.length];
@@ -1472,6 +1486,225 @@
     });
   }
 
+
+  /* ========================================================================
+     9b. DAYCYCLE — optional day plan from three biorhythm cycles
+     Off by default (Settings). Computed on the device from the birth date,
+     which is encrypted when App lock is on. Each part of the day points to a
+     real Sovereign practice the member's track and level allow. An evening
+     check-in lets each person see, after a month, whether it matches them.
+     The morning brief rides on the daily reminder; tomorrow's turning points
+     appear only inside the app, never as an extra notification.
+     ======================================================================== */
+  const DC = () => C.DAYCYCLE;
+  const dcDob = () => (state.daycycle.dobEnc ? DOB_PLAIN : state.daycycle.dob) || "";
+  const dcReady = () => !!(state.daycycle.on && dcDob() && DC());
+  const dcT = (key = todayKey()) => DC().daysAlive(dcDob(), key);
+  const PACER_NAMES = { "so-hum": "So Hum breath", nadi: "Alternate Nostril Breath", bhramari: "Bee Breath", "478": "4-7-8 Breath", aum: "AUM Chant" };
+  const DC_COLOR = { phy: "var(--cy-phy)", emo: "var(--cy-emo)", int: "var(--cy-int)", all: "var(--muted)" };
+
+  /** Women's track: the most recent cycle phase logged in the last 5 days. */
+  function dcPhase() {
+    if (state.profile.track !== "women") return null;
+    for (let i = 0; i < 5; i++) {
+      const ph = state.days[dateKey(addDays(new Date(), -i))]?.practices?.cycle?.phase;
+      if (ph && ph !== "unsure") return ph;
+    }
+    return null;
+  }
+  /** First suggestion the member's track and level allow → { label, attr }. */
+  function dcAction(acts) {
+    for (const a of acts || []) {
+      if (a.type === "protocol") {
+        const p = C.PROTOCOLS.find((x) => x.id === a.id);
+        if (p && p.tracks.includes(state.profile.track) && protocolAllowed(p)) return { label: p.title, sub: `${p.minutes}-minute protocol`, attr: `data-dc-start="${p.id}"` };
+      }
+      if (a.type === "pacer" && PACER_NAMES[a.id] && (BASIC_PATTERNS.includes(a.id) || deepAllowed())) return { label: PACER_NAMES[a.id], sub: "Breath & mantra", attr: `data-dc-pacer="${a.id}"` };
+      if (a.type === "sound") {
+        const p = C.SOUND.presets.find((x) => x.id === a.id);
+        if (p) return { label: `${p.name} sound`, sub: `${p.band} · ${p.minutes} min`, attr: `data-dc-sound="${p.id}"` };
+      }
+      if (a.type === "lesson") {
+        const l = C.LESSONS.find((x) => lessonAllowed(x) && !state.lessons[x.id]);
+        if (l) return { label: l.title, sub: `${l.minutes}-minute lesson`, attr: `data-dc-lesson="${l.id}"` };
+      }
+      if (a.type === "journal") return { label: "Write it out in your journal", sub: "Journal", attr: "data-dc-journal" };
+    }
+    return null;
+  }
+  const dcActBtn = (act, primary) => act ? `<button class="dc-act ${primary ? "primary" : ""}" ${act.attr}>
+      <span class="dc-act-label">${esc(act.label)}</span><span class="dc-act-sub">${esc(act.sub)}</span><span aria-hidden="true" class="dc-act-arrow">→</span></button>` : "";
+
+  function dcToday() {
+    const t = dcT(), phase = dcPhase();
+    const blocks = DC().plan(t, { phase });
+    return { t, phase, blocks, read: DC().readings(t), head: DC().headline(t), key: DC().keyBlock(t, blocks) };
+  }
+  function dcMeter(r, big) {
+    const w = Math.abs(r.v) * 50;
+    return `<div class="dc-read ${big ? "big" : ""}" style="--c:${DC_COLOR[r.k]}">
+      <span class="dc-name">${r.n}</span>
+      <span class="dc-val">${DC().signed(r.v)}</span>
+      <span class="dc-state ${r.state.id}">${r.state.label}</span>
+      <span class="dc-meter" aria-hidden="true"><i style="left:${r.v >= 0 ? 50 : 50 - w}%;width:${w}%"></i></span>
+      ${big ? `<span class="dc-trend">${r.state.up ? "Rising" : "Falling"} · ${r.p}-day cycle</span>` : ""}</div>`;
+  }
+  function dcFeelHTML() {
+    const cur = state.daycycle.feel[todayKey()];
+    return `<div class="dc-feel"><p class="field-label">How did today actually feel?</p>
+      <div class="seg" role="group" aria-label="How today felt">${DC().FEEL.map(([n, l]) =>
+        `<button class="chip" data-dc-feel="${n}" aria-pressed="${cur === n}">${l}</button>`).join("")}</div></div>`;
+  }
+
+  function renderDaycycleCard() {
+    const el = $("#daycycle-card");
+    if (!el) return;
+    if (!state.daycycle.on || !DC()) { el.innerHTML = ""; return; }
+    if (!dcDob()) {
+      el.innerHTML = `<div class="card dc-card dc-empty"><p class="eyebrow">Daycycle</p>
+        <p>Add your birth date to see today's cycles and a plan for the day.</p>
+        <button class="btn" data-dc-setup>Add birth date</button></div>`;
+      return;
+    }
+    const d = dcToday(), act = dcAction(d.key.act), tom = DC().tomorrow(d.t);
+    const evening = new Date().getHours() >= 17 || state.daycycle.feel[todayKey()];
+    el.innerHTML = `<div class="card dc-card">
+      <p class="eyebrow">Daycycle</p>
+      <h2>${esc(d.head.h)}</h2>
+      <div class="dc-reads">${d.read.map((r) => dcMeter(r)).join("")}</div>
+      ${d.phase ? `<p class="dc-phase">${esc(DC().PHASE[d.phase])}</p>` : ""}
+      ${act ? `<p class="field-label" style="margin:14px 0 6px">Suggested for today</p>${dcActBtn(act, true)}` : ""}
+      ${tom ? `<p class="dc-tomorrow"><span aria-hidden="true">◦</span> Tomorrow: ${esc(tom)}</p>` : ""}
+      ${evening ? dcFeelHTML() : ""}
+      <button class="link-btn dc-open" data-dc-open>Plan my day</button></div>`;
+  }
+
+  function openDaycycle() {
+    renderDaycycleBody();
+    if ($("#daycycle").hidden) openOverlay($("#daycycle"), closeDaycycle);
+  }
+  function closeDaycycle() { closeOverlay($("#daycycle")); }
+  function renderDaycycleBody() {
+    const d = dcToday(), wake = state.daycycle.wake || "07:00";
+    const at = (m) => { const [h, mi] = wake.split(":").map(Number); const x = (h * 60 + mi + m) % 1440; return fmtClock(`${String(Math.floor(x / 60)).padStart(2, "0")}:${String(x % 60).padStart(2, "0")}`); };
+    const up = DC().upcoming(dcDob(), todayKey(), 30, 8);
+    const m = DC().match(dcDob(), state.daycycle.feel);
+    const fmtD = (k) => parseKey(k).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    $("#daycycle-body").innerHTML = `
+      <p class="eyebrow">${fmtLongDate(new Date())}</p>
+      <h3 class="dc-head">${esc(d.head.h)}</h3>
+      <p class="muted">${esc(d.head.s)}</p>
+      <div class="dc-reads big">${d.read.map((r) => dcMeter(r, true)).join("")}</div>
+      ${d.phase ? `<p class="dc-phase">${esc(DC().PHASE[d.phase])}</p>` : ""}
+
+      <h4 class="dc-sec">How to run your day</h4>
+      <ol class="dc-plan">${d.blocks.map((b) => `<li style="--c:${DC_COLOR[b.k]}">
+        <span class="dc-when">${at(b.at)}</span><strong class="dc-what">${esc(b.what)}</strong>
+        <p>${esc(b.txt)}</p>${dcActBtn(dcAction(b.act))}</li>`).join("")}</ol>
+      <p class="hint">Times start from your wake time (${fmtClock(wake)}), which you can change in Settings.</p>
+
+      ${dcFeelHTML()}
+
+      <h4 class="dc-sec">Fifteen days either side</h4>
+      <div class="dc-chart">${dcChart(d.t)}
+        <div class="dc-legend">${DC().CYCLES.map((c) => `<span style="--c:${DC_COLOR[c.k]}">${c.n} · ${c.p}d</span>`).join("")}</div></div>
+
+      <h4 class="dc-sec">Coming up</h4>
+      ${up.length ? `<dl class="dc-up">${up.map((r) => `<div><dt>${fmtD(r.date)}</dt><dd>${esc(r.events.join(" · "))}</dd></div>`).join("")}</dl>` : `<p class="muted">No turning points in the next 30 days.</p>`}
+
+      <h4 class="dc-sec">Does it match you?</h4>
+      ${m.ready ? `<p>${esc(m.verdict)}</p>
+        <p class="muted small">Based on ${m.n} evening check-ins. ${m.cycles[0].r >= 0.2 ? `${m.cycles[0].n} follows you most closely.` : "No single cycle stands out."}</p>`
+      : `<p class="muted">Rate how each day felt in the evening. After ${m.need} check-ins, Sovereign shows how closely the cycles match your real days.</p>
+        <div class="progress" role="progressbar" aria-label="Check-ins so far" aria-valuemin="0" aria-valuemax="${m.need}" aria-valuenow="${m.n}"><span class="progress-fill" style="width:${Math.round(m.n / m.need * 100)}%"></span></div>
+        <p class="progress-caption">${m.n} of ${m.need} days</p>`}
+
+      <p class="dc-disclaimer">${esc(DC().DISCLAIMER)}</p>`;
+  }
+  function dcChart(t0) {
+    const W = 360, H = 190, L = 30, R = 6, T = 10, B = 24, N = 15;
+    const x = (i) => L + ((i + N) * (W - L - R)) / (2 * N), y = (v) => T + ((1 - v) / 2) * (H - T - B);
+    let g = `<g class="dc-axis">`;
+    [1, 0, -1].forEach((v) => { g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="${v === 0 ? "zero" : ""}"/><text x="${L - 5}" y="${y(v) + 3}" text-anchor="end">${v > 0 ? "+100" : v < 0 ? "−100" : "0"}</text>`; });
+    for (let i = -N; i <= N; i += 5) g += `<text x="${x(i)}" y="${H - 7}" text-anchor="middle">${i === 0 ? "today" : (i > 0 ? "+" : "−") + Math.abs(i)}</text>`;
+    g += `</g><line class="dc-today" x1="${x(0)}" x2="${x(0)}" y1="${T}" y2="${H - B}"/>`;
+    DC().CYCLES.forEach((c) => {
+      let dpath = "";
+      for (let s = -N * 4; s <= N * 4; s++) { const i = s / 4; dpath += (s === -N * 4 ? "M" : "L") + x(i).toFixed(1) + "," + y(DC().val(t0 + i, c.p)).toFixed(1); }
+      g += `<path d="${dpath}" style="stroke:${DC_COLOR[c.k]}"/><circle cx="${x(0)}" cy="${y(DC().val(t0, c.p)).toFixed(1)}" r="3.5" style="fill:${DC_COLOR[c.k]}"/>`;
+    });
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Wave chart of the three cycles, fifteen days before and after today">${g}</svg>`;
+  }
+
+  /** Lines for the daily reminder, kept only while notifications show details. */
+  function refreshBriefs() {
+    const out = {};
+    if (dcReady() && state.settings.discreet === false) {
+      for (let i = 0; i < 8; i++) {
+        const k = dateKey(addDays(new Date(), i)), t = dcT(k);
+        const act = dcAction(DC().keyBlock(t, DC().plan(t, { phase: i === 0 ? dcPhase() : null })).act);
+        out[k] = DC().brief(t) + (act ? `. Suggested: ${act.label}` : "");
+      }
+    }
+    const changed = JSON.stringify(out) !== JSON.stringify(state.daycycle.briefs || {});
+    state.daycycle.briefs = out;
+    return changed;
+  }
+  function dailyReminderBody(key) {
+    if (state.settings.discreet !== false) return "A gentle reminder from Sovereign.";
+    const b = state.daycycle.on && state.daycycle.briefs?.[key];
+    return b ? `${b}.` : "Your practice time has arrived. Five minutes is enough to begin.";
+  }
+  async function setDob(v) {
+    if (v && (v > todayKey() || v < "1900-01-01")) { toast("Please enter a real birth date."); return; }
+    if (secOn() && KEY) {
+      DOB_PLAIN = v || "";
+      state.daycycle.dobEnc = v ? await SovSecure.encryptText(KEY, v) : null;
+      state.daycycle.dob = "";
+    } else state.daycycle.dob = v || "";
+    refreshBriefs(); save();
+    toast(v ? "Birth date saved on this device" : "Birth date removed");
+  }
+  function daycycleSettingsHTML(seg) {
+    const on = !!state.daycycle.on;
+    return `<div class="setting-group"><h3>Daycycle</h3>
+      ${seg("daycycle", [["on", "On"], ["off", "Off"]], on ? "on" : "off")}
+      ${on ? `<div class="dc-fields">
+        <label class="field"><span class="field-label">Birth date</span><input type="date" id="set-dc-dob" max="${todayKey()}" value="${esc(dcDob())}"></label>
+        <label class="field"><span class="field-label">Usual wake time</span><input type="time" id="set-dc-wake" value="${esc(state.daycycle.wake || "07:00")}"></label></div>` : ""}
+      <p class="hint" style="margin-top:10px">An optional way to plan your day with three classic biorhythm cycles (physical, emotional and intellectual) from your birth date, each matched to a Sovereign practice.
+        Your birth date stays on this device${secOn() ? " and is encrypted with your passcode" : " and is encrypted when App lock is on"}. When reminder notifications show details, your daily reminder carries the day's brief.
+        Biorhythms aren't scientifically proven, so an evening check-in shows how well it matches you.</p></div>`;
+  }
+
+  function bindDaycycle() {
+    const handler = (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      const inSheet = !$("#daycycle").hidden;
+      const leave = () => { if (inSheet) closeDaycycle(); };
+      if (b.hasAttribute("data-dc-open")) openDaycycle();
+      else if (b.hasAttribute("data-dc-setup")) { openSettings(); setTimeout(() => $("#set-dc-dob")?.focus(), 60); }
+      else if (b.dataset.dcStart) { leave(); startTimer(b.dataset.dcStart); }
+      else if (b.dataset.dcPacer) { leave(); openPacer(b.dataset.dcPacer); }
+      else if (b.dataset.dcSound) { leave(); openSoundPlayer(b.dataset.dcSound); }
+      else if (b.dataset.dcLesson) { leave(); go("library"); openLesson(b.dataset.dcLesson); }
+      else if (b.hasAttribute("data-dc-journal")) { leave(); go("journal"); }
+      else if (b.dataset.dcFeel) {
+        const n = Number(b.dataset.dcFeel), k = todayKey();
+        if (state.daycycle.feel[k] === n) delete state.daycycle.feel[k]; else state.daycycle.feel[k] = n;
+        save(); renderDaycycleCard();
+        if (inSheet) renderDaycycleBody();
+        const sel = `[data-dc-feel="${n}"]`; const f = inSheet ? $(`#daycycle ${sel}`) : $(`#daycycle-card ${sel}`); f && f.focus();
+        if (state.daycycle.feel[k]) toast("Noted. Thank you for checking in.");
+      }
+    };
+    $("#daycycle-card").addEventListener("click", handler);
+    $("#daycycle-body").addEventListener("click", handler);
+    $("#close-daycycle").addEventListener("click", closeDaycycle);
+    $("#daycycle").addEventListener("click", (e) => { if (e.target.id === "daycycle") closeDaycycle(); });
+  }
+
   /* ========================================================================
      9c. BREATH & MANTRA PACER + MALA COUNTER
      A breathing orb that expands on inhale, holds, and contracts on exhale,
@@ -2058,6 +2291,7 @@
         <p class="hint" style="margin-top:10px">Nothing is ever scheduled for you. At most two a day: your daily practice reminder (leave blank for none), and a focus reminder only if you add one on Home. Each is skipped if it's already done.
           Times follow this device's time zone (${esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "local time")}).
           ${NATIVE ? "Reminders arrive even when Sovereign is closed." : EXT ? "Reminders arrive even when Sovereign is closed, as long as Chrome is running." : "On the web, reminders arrive while Sovereign is open or minimised."}</p></div>
+      ${daycycleSettingsHTML(seg)}
       <div class="setting-group"><h3>Guidance sounds</h3>
         ${cueSliderHTML("set-cue-vol")}
         ${seg("duckSessions", [["on", "Dip frequencies during cues"], ["off", "Keep frequencies steady"]], state.settings.duckSessions === false ? "off" : "on")}
@@ -2106,8 +2340,10 @@
         else if (set === "reminderSound") state.settings.reminderSound = val;
         else if (set === "duckSessions") state.settings.duckSessions = val === "on";
         else if (set === "discreet") state.settings.discreet = val === "on";
+        else if (set === "daycycle") { state.daycycle.on = val === "on"; refreshBriefs(); save(); renderSettingsBody(); toast(val === "on" ? "Daycycle is on" : "Daycycle is off"); if (val === "on" && !dcDob()) $("#set-dc-dob")?.focus(); return; }
         else if (set === "autoLock") { state.security.autoLock = Number(val); setGrace(); }
         else state.profile[set] = val;
+        if (set === "discreet") refreshBriefs();
         save();
         $$(`[data-set="${set}"]`, body).forEach((x) => x.setAttribute("aria-pressed", x.dataset.val === val));
         toast(set === "discreet" ? (val === "on" ? "Notifications are discreet" : "Notifications show details") : set === "autoLock" ? (val === "0" ? "Locks whenever Sovereign is closed" : `Locks after ${val} minutes away`) : set === "duckSessions" ? (val === "on" ? "Frequencies will dip during cues" : "Frequencies stay steady") : set === "reminders" ? `Reminders ${val}` : set === "reminderSound" ? `Reminder sound: ${cap(val)}` : `${cap(set)} set to ${cap(val)}`);
@@ -2128,6 +2364,8 @@
         if (e.target.value) { requestNotifyPermission(); toast(`Reminder set for ${e.target.value}`); } else toast("Reminder off");
       }
       if (e.target.id === "set-import-file" && e.target.files[0]) importData(e.target.files[0]);
+      if (e.target.id === "set-dc-dob") setDob(e.target.value);
+      if (e.target.id === "set-dc-wake" && e.target.value) { state.daycycle.wake = e.target.value; save(); toast(`Wake time ${fmtClock(e.target.value)}`); }
     });
   }
 
@@ -2185,6 +2423,7 @@
     await decryptJournal();
     state.journal = decryptedJournalPlain();
     state.draft = draftPlain; state.draftEnc = null;
+    if (state.daycycle.dobEnc) { state.daycycle.dob = DOB_PLAIN; state.daycycle.dobEnc = null; }
     state.security = null; KEY = null; PLAIN.clear();
     save(); await clearGrace();
     $("#lock-now").hidden = true;
@@ -2248,7 +2487,7 @@
       });
       if (v !== "yes") return;
       state = normalise(data);
-      PLAIN.clear(); draftPlain = "";
+      PLAIN.clear(); draftPlain = ""; DOB_PLAIN = "";
       KEY = secOn() ? importKey : null;
       if (KEY) { await decryptJournal(); await setGrace(); }
       save(); applyTheme();
@@ -2363,7 +2602,7 @@
     const r = state.profile.reminder;
     if (r && hhmm >= r && state.meta.lastNotified !== tk && !practiced(tk)) {
       state.meta.lastNotified = tk; save();
-      if (!EXT && !NATIVE) deliverReminder("Sovereign", state.settings.discreet === false ? "Your practice time has arrived. Five minutes is enough to begin." : "A gentle reminder from Sovereign.", "sovereign-reminder");
+      if (!EXT && !NATIVE) deliverReminder("Sovereign", dailyReminderBody(tk), "sovereign-reminder");
       if (currentView === "home") renderBanners();
     }
 
@@ -2401,7 +2640,7 @@
       b.addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("index.html?full=1") }));
     }
     if (IS_FULL) document.body.classList.add("full-view");
-    bindHome(); bindBanners(); bindGuide(); bindFocus(); bindPacer(); bindSound(); bindCueSliders(); bindTimer(); bindLibrary(); bindJournal(); bindSettings();
+    bindHome(); bindBanners(); bindGuide(); bindFocus(); bindDaycycle(); bindPacer(); bindSound(); bindCueSliders(); bindTimer(); bindLibrary(); bindJournal(); bindSettings();
     $$(".nav-btn").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
     go("home");
     checkMilestones();

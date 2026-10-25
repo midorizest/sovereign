@@ -26,6 +26,7 @@
   <script src="js/security.js" defer></script>
   <script src="js/content.js" defer></script>
   <script src="js/protocols.js" defer></script>
+  <script src="content/daycycle.js" defer></script>
   <script src="js/sound-engine.js" defer></script>
   <script src="js/app.js" defer></script>
 </head>
@@ -169,6 +170,9 @@
           <p class="progress-caption" id="today-progress-caption"></p>
           <div class="week" id="week-strip" aria-label="Last 7 days"></div>
         </div>
+
+        <!-- Daycycle (optional): today's cycles and a plan for the day -->
+        <div id="daycycle-card"></div>
 
         <!-- Today's focus: one Guide practice chosen for real-world use -->
         <div id="focus-card"></div>
@@ -388,6 +392,16 @@
         <button class="icon-btn" id="close-settings" aria-label="Close settings">✕</button>
       </div>
       <div id="settings-body"></div>
+    </div>
+  </section>
+
+  <section id="daycycle" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="daycycle-title">
+    <div class="sheet-inner">
+      <div class="sheet-head">
+        <h2 id="daycycle-title" class="view-title">Daycycle</h2>
+        <button class="icon-btn" id="close-daycycle" aria-label="Close Daycycle">✕</button>
+      </div>
+      <div id="daycycle-body"></div>
     </div>
   </section>
 

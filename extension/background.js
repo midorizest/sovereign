@@ -81,7 +81,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   if (alarm.name === ALARM) {
     if (!practicedToday(s)) {
-      notify(ALARM, "Sovereign", s.settings?.discreet === false ? "Your practice time has arrived. Five minutes is enough to begin." : "A gentle reminder from Sovereign.", om);
+      // With details on, the Daycycle brief (prepared by the app) leads the reminder.
+      const brief = s.daycycle?.on && s.daycycle?.briefs?.[dateKey()];
+      notify(ALARM, "Sovereign", s.settings?.discreet === false ? (brief ? `${brief}.` : "Your practice time has arrived. Five minutes is enough to begin.") : "A gentle reminder from Sovereign.", om);
     }
     scheduleReminder(); // tomorrow
   } else {
