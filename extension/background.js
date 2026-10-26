@@ -77,7 +77,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== ALARM && alarm.name !== FOCUS_ALARM) return;
   const s = (await chrome.storage.local.get(KEY))[KEY];
   if (!s?.profile || s.settings?.reminders === false) { if (alarm.name === ALARM) scheduleReminder(); return; }
-  const om = s.settings?.reminderSound !== "silent";
+  // Reminder sound: the Om, or a bell on the Christian path (or when chosen).
+  const kind = s.settings?.reminderSound === "bell" || (s.settings?.faith === "christian" && s.settings?.reminderSound !== "silent") ? "bell" : "om";
+  const om = s.settings?.reminderSound !== "silent" ? kind : false;
 
   if (alarm.name === ALARM) {
     if (!practicedToday(s)) {
@@ -98,17 +100,17 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 /** Show a notification; if the Om is on, play it (and keep the notification itself silent). */
 function notify(id, title, message, om) {
-  chrome.notifications.create(id, { type: "basic", iconUrl: "icons/icon-128.png", title, message, priority: 1, silent: om });
-  if (om) playOm();
+  chrome.notifications.create(id, { type: "basic", iconUrl: "icons/icon-128.png", title, message, priority: 1, silent: !!om });
+  if (om) playOm(om);
 }
 
 /** Play the Om through the offscreen audio page — unless a sound session is playing there. */
-async function playOm() {
+async function playOm(kind = "om") {
   try {
     await ensureOffscreen();
     const st = await chrome.runtime.sendMessage({ target: "offscreen", type: "status" }).catch(() => null);
     if (st) return; // don't interrupt a meditation in progress
-    await chrome.runtime.sendMessage({ target: "offscreen", type: "om" });
+    await chrome.runtime.sendMessage({ target: "offscreen", type: "om", kind });
     const still = await chrome.runtime.sendMessage({ target: "offscreen", type: "status" }).catch(() => null);
     if (!still) await chrome.offscreen.closeDocument().catch(() => {});
   } catch (_) { /* audio unavailable — the notification still shows */ }

@@ -24,7 +24,7 @@
 (() => {
   "use strict";
   const C = window.SOV; // content from content.js
-  const APP_VERSION = "1.10.0";
+  const APP_VERSION = "1.11.0";
   const STORAGE_KEY = "sovereign.v1";
 
   /* Platform: the same code runs as a website/PWA and as a Chrome extension.
@@ -114,6 +114,18 @@
   let DOB_PLAIN = "";            // decrypted Daycycle birth date while unlocked
   let unlockedOnce = false;
   const secOn = () => !!state.security?.enabled;
+
+  /* Faith path (Settings › Faith & Scripture): "open" (default), "blended" or "christian".
+     Blended adds Scripture and Christian prayer; Christian also sets aside
+     practices from other traditions and swaps in Christian ones. */
+  const faith = () => state.settings.faith || "open";
+  const scriptureOn = () => faith() !== "open" && !!C.SCRIPTURE;
+  const christian = () => faith() === "christian" && !!C.SCRIPTURE;
+  const hiddenFor = (kind, id) => christian() && C.SCRIPTURE.HIDE[kind].includes(id);
+  const reminderSound = () => { const r = state.settings.reminderSound || "om"; return r === "om" && faith() === "christian" ? "bell" : r; };
+  const translation = () => (state.settings.translation === "web" ? "web" : "kjv");
+  const verseText = (ref) => C.SCRIPTURE?.VERSES[ref]?.[translation()] || "";
+  const verseHTML = (ref) => `<blockquote class="verse"><p>${esc(verseText(ref))}</p><cite>${esc(ref)} · ${C.SCRIPTURE.SHORT[translation()]}</cite></blockquote>`;
   const GRACE_KEY = "sovereign.grace";
 
   function entryView(j) {
@@ -332,6 +344,7 @@
     try {
       // Android plays a channel's sound; the Om lives in res/raw/om.wav.
       await LN.createChannel({ id: "sovereign-om", name: "Reminders · Om", description: "Gentle reminders with the Om sound", importance: 4, sound: "om.wav", visibility: 0, vibration: true });
+      await LN.createChannel({ id: "sovereign-bell", name: "Reminders · Bell", description: "Gentle reminders with a church bell", importance: 4, sound: "bell.wav", visibility: 0, vibration: true });
       await LN.createChannel({ id: "sovereign-quiet", name: "Reminders · Silent", description: "Gentle reminders without sound", importance: 2, visibility: 0, vibration: false });
       channelsReady = true;
     } catch (_) {}
@@ -345,7 +358,7 @@
       if (mine.length) await LN.cancel({ notifications: mine });
       if (state.settings.reminders === false) return;
       await ensureChannels();
-      const channelId = state.settings.reminderSound === "silent" ? "sovereign-quiet" : "sovereign-om";
+      const channelId = { silent: "sovereign-quiet", bell: "sovereign-bell" }[reminderSound()] || "sovereign-om";
       const discreet = state.settings.discreet !== false;
       const now = new Date(), list = [];
       const r = state.profile.reminder;
@@ -501,6 +514,9 @@
     radioGroup($$("[data-level]"), (el) => { ob.level = el.dataset.level; $("#ob-next-3").disabled = false; });
     $("#ob-next-3").addEventListener("click", () => showStep(4));
 
+    radioGroup($$("[data-faith]"), (el) => { ob.faith = el.dataset.faith; $("#ob-next-4").disabled = false; });
+    $("#ob-next-4").addEventListener("click", () => showStep(5));
+
     $("#ob-name").addEventListener("input", (e) => ($("#ob-finish").disabled = !e.target.value.trim()));
     $("#ob-name").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.value.trim()) finishOnboarding(); });
     $("#ob-finish").addEventListener("click", finishOnboarding);
@@ -535,6 +551,8 @@
       reminder: $("#ob-reminder").value || "",
       createdAt: new Date().toISOString()
     };
+    state.settings.faith = ob.faith || "open";
+    if (state.settings.faith === "christian") { state.settings.reminderSound = "bell"; G.tab = "scripture"; }
     save();
     if (state.profile.reminder) requestNotifyPermission();
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
@@ -632,8 +650,16 @@
     if (refreshBriefs()) save();
 
     // Principle of the day
-    const pr = C.PRINCIPLES[dayIndex() % C.PRINCIPLES.length];
-    $("#daily-principle").innerHTML = `<p class="q">“${esc(pr.q)}”</p><p class="src">${esc(pr.src)}</p>`;
+    // Christian path: a verse every day. Blended: verse and principle on alternate days.
+    if (scriptureOn() && (christian() || dayIndex() % 2 === 0)) {
+      const ref = C.SCRIPTURE.DAILY[Math.floor(dayIndex() / (christian() ? 1 : 2)) % C.SCRIPTURE.DAILY.length];
+      $("#daily-principle").innerHTML = `<p class="eyebrow verse-eyebrow">Verse of the day</p><p class="q">${esc(verseText(ref))}</p>
+        <p class="src">${esc(ref)} · ${C.SCRIPTURE.SHORT[translation()]}</p>
+        <button class="link-btn verse-help" data-scripture-help>Struggling? Find a verse for it</button>`;
+    } else {
+      const pr = C.PRINCIPLES[dayIndex() % C.PRINCIPLES.length];
+      $("#daily-principle").innerHTML = `<p class="q">“${esc(pr.q)}”</p><p class="src">${esc(pr.src)}</p>`;
+    }
 
     renderBanners();
   }
@@ -695,6 +721,12 @@
 
   /* Event delegation for the checklist (one listener, survives re-renders). */
   function bindHome() {
+    $("#daily-principle").addEventListener("click", (e) => {
+      if (!e.target.closest("[data-scripture-help]")) return;
+      G.tab = "scripture"; G.query = ""; $("#guide-search").value = "";
+      go("guide");
+      setTimeout(() => { const h = $("#struggles-head"); h && h.scrollIntoView({ block: "start" }); $(".struggles .chip")?.focus({ preventScroll: true }); }, 120);
+    });
     const listEl = $("#practice-list");
 
     listEl.addEventListener("click", (e) => {
@@ -818,7 +850,7 @@
 
   function guidedHTML() {
     const track = state.profile.track;
-    const available = C.PROTOCOLS.filter((p) => p.tracks.includes(track));
+    const available = C.PROTOCOLS.filter((p) => p.tracks.includes(track) && !hiddenFor("protocols", p.id));
     const groups = LEVELS.map((lvl) => {
       const items = available.filter((p) => p.level === lvl);
       if (!items.length) return "";
@@ -864,19 +896,25 @@
 
   async function breathHTML() {
     try { await ensureGuide(); } catch { return '<p class="empty">Breath practices could not load. Connect once to download them.</p>'; }
-    const tools = [...BASIC_PATTERNS, ...(deepAllowed() ? DEEP_PATTERNS : [])];
-    return `<p class="view-sub" style="margin-bottom:16px">A guided breathing orb with mantra and nostril cues. Sessions log to Breathwork.</p>` +
-      tools.map((t) => {
-        const pat = C.PACER[t];
-        const cycle = pat.phases.reduce((a, ph) => a + ph.s, 0);
-        return `<button class="card item-card breath-card" data-pacer="${t}">
-          <div class="meta"><span class="tag">${DEEP_PATTERNS.includes(t) ? "Deepen" : "All levels"}</span><span>${cycle}s per round</span></div>
-          <h3>${esc(pat.title)}</h3><p class="muted" style="margin:0">${esc(pat.note)}</p></button>`;
-      }).join("") +
-      `<button class="card item-card breath-card" data-pacer="mala">
+    const christianTools = scriptureOn() ? C.SCRIPTURE.PACER_ORDER : [];
+    const tools = [...christianTools, ...[...BASIC_PATTERNS, ...(deepAllowed() ? DEEP_PATTERNS : [])].filter((t) => !hiddenFor("pacer", t))];
+    const card = (t) => {
+      const pat = pacerPattern(t);
+      const cycle = pat.phases.reduce((a, ph) => a + ph.s, 0);
+      const tag = christianTools.includes(t) ? "Breath prayer" : DEEP_PATTERNS.includes(t) ? "Deepen" : "All levels";
+      return `<button class="card item-card breath-card" data-pacer="${t}">
+        <div class="meta"><span class="tag">${tag}</span><span>${cycle}s per round</span></div>
+        <h3>${esc(pat.title)}</h3><p class="muted" style="margin:0">${esc(pat.note)}</p></button>`;
+    };
+    const rope = `<button class="card item-card breath-card" data-pacer="rope">
+        <div class="meta"><span class="tag">Prayer rope</span><span>100 prayers</span></div>
+        <h3>Prayer Rope</h3><p class="muted" style="margin:0">Count 100 prayers of the Jesus Prayer, or a line of Scripture. Logs to Meditation.</p></button>`;
+    const mala = `<button class="card item-card breath-card" data-pacer="mala">
         <div class="meta"><span class="tag">Japa</span><span>108 repetitions</span></div>
-        <h3>Mala Counter</h3><p class="muted" style="margin:0">Count 108 repetitions of your mantra. Logs to Meditation.</p></button>` +
-      (deepAllowed() ? "" : '<p class="hint">Bija Ascent, the Six Healing Sounds and Retention open with Deepen in the Guide.</p>');
+        <h3>Mala Counter</h3><p class="muted" style="margin:0">Count 108 repetitions of your mantra. Logs to Meditation.</p></button>`;
+    return `<p class="view-sub" style="margin-bottom:16px">A guided breathing orb with ${christian() ? "prayer" : "mantra"} and nostril cues. Sessions log to Breathwork.</p>` +
+      tools.map(card).join("") + (scriptureOn() ? rope : "") + (christian() ? "" : mala) +
+      (deepAllowed() ? "" : `<p class="hint">${christian() ? "Breath retention opens" : "Bija Ascent, the Six Healing Sounds and Retention open"} with Deepen in the Guide.</p>`);
   }
 
   function soundHTML() {
@@ -920,7 +958,7 @@
 
   function startTimer(id) {
     const p = C.PROTOCOLS.find((x) => x.id === id);
-    if (!p || !protocolAllowed(p)) return;
+    if (!p || !protocolAllowed(p) || hiddenFor("protocols", p.id)) return;
     Object.assign(T, { proto: p, idx: 0, running: true, startedAt: Date.now() });
     $("#timer-title").textContent = p.title;
     $("#timer-cue-slot").innerHTML = cueSliderHTML("timer-cue-vol");
@@ -1120,9 +1158,10 @@
   function renderLibrary() {
     $("#lesson-reader").hidden = true;
     $("#lesson-list").hidden = false;
-    const ready = C.LESSONS.filter((l) => l.file);
-    const later = C.LESSONS.filter((l) => !l.file);
-    const total = C.LESSONS.length, completed = Object.keys(state.lessons).length;
+    const lessons = C.LESSONS.filter((l) => !hiddenFor("lessons", l.id));
+    const ready = lessons.filter((l) => l.file);
+    const later = lessons.filter((l) => !l.file);
+    const total = lessons.length, completed = lessons.filter((l) => state.lessons[l.id]).length;
 
     $("#lesson-list").innerHTML =
       `<div class="progress" role="progressbar" aria-label="Lessons completed" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${completed}" style="margin:0 0 6px">
@@ -1198,24 +1237,26 @@
      "I applied it" check-in worth Sovereign Points. The focus stores a small
      snapshot (title + cue) so Home never needs to load the guide file.
      ======================================================================== */
-  const G = { tab: "build", open: new Set(), query: "" };
+  const G = { tab: "build", open: new Set(), query: "", struggle: null };
   const pick = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v[state.profile.track] || v.men : v);
 
   const GTABS = ["build", "apply", "deepen", "books"];
-  const GTAB_NAMES = { build: "Build", apply: "Apply", deepen: "Deepen", books: "Books" };
+  const GTAB_NAMES = { scripture: "Scripture", build: "Build", apply: "Apply", deepen: "Deepen", books: "Books" };
 
   /** Load the Build/Apply file first (it defines SOV.GUIDE), then Deepen + Books. */
   async function ensureGuide() {
     await loadScript("content/guide.js");
     await loadScript("content/deepen.js");
     await loadScript("content/hand.js");
+    if (C.SCRIPTURE && C.GUIDE) C.GUIDE.scripture = C.SCRIPTURE.guide;
   }
 
   /** All practice items for the current track, flattened with their tab. */
   function guideItems() {
     if (!C.GUIDE) return [];
-    return ["build", "apply", "deepen"].filter((t) => C.GUIDE[t]).flatMap((tab) => C.GUIDE[tab].categories.flatMap((cat) =>
-      cat.items.filter((i) => i.tracks.includes(state.profile.track)).map((i) => ({ ...i, tab }))));
+    return ["build", "apply", "deepen", ...(scriptureOn() ? ["scripture"] : [])].filter((t) => C.GUIDE[t]).flatMap((tab) => C.GUIDE[tab].categories
+      .filter((cat) => !hiddenFor("guideCats", cat.name))
+      .flatMap((cat) => cat.items.filter((i) => i.tracks.includes(state.profile.track) && !hiddenFor("guide", i.id)).map((i) => ({ ...i, tab }))));
   }
   const itemText = (i) => [pick(i.title), pick(i.why), pick(i.cue), (pick(i.steps) || []).join(" ")].join(" ").toLowerCase();
   const bookText = (b) => [b.title, b.author, b.note].join(" ").toLowerCase();
@@ -1227,12 +1268,16 @@
       try { await ensureGuide(); }
       catch { panel.innerHTML = '<p class="empty">The guide could not load. Connect once to download it.</p>'; return; }
     }
+    // The Scripture tab appears on the Blended and Christian paths.
+    if (G.tab === "scripture" && !scriptureOn()) G.tab = "build";
+    $("#tab-scripture").hidden = !scriptureOn();
+    $("#tab-scripture").parentElement.classList.toggle("tabs-5", scriptureOn());
     $$("[data-gtab]").forEach((t) => {
       const on = t.dataset.gtab === G.tab;
       t.setAttribute("aria-selected", on); t.tabIndex = on ? 0 : -1;
     });
     panel.setAttribute("aria-labelledby", `tab-${G.tab}`);
-    $("#guide-search").placeholder = G.tab === "books" ? "Search books…" : "Search practices…";
+    $("#guide-search").placeholder = G.tab === "books" ? "Search books…" : G.tab === "scripture" ? "Search verses and practices…" : "Search practices…";
 
     const q = G.query.trim().toLowerCase();
     const track = state.profile.track;
@@ -1240,8 +1285,9 @@
     /* --- Books --- */
     if (G.tab === "books") {
       const sec = C.GUIDE.books;
-      const cats = sec.categories.map((cat) => {
-        const books = cat.items.filter((b) => b.tracks.includes(track) && (!q || bookText(b).includes(q)));
+      const bookCats = [...(scriptureOn() ? [C.SCRIPTURE.BOOKS] : []), ...sec.categories.filter((cat) => !hiddenFor("bookCats", cat.name))];
+      const cats = bookCats.map((cat) => {
+        const books = cat.items.filter((b) => (!b.tracks || b.tracks.includes(track)) && (!q || bookText(b).includes(q)));
         if (!books.length) return "";
         return `<div class="cat-head"><h2>${esc(cat.name)}</h2></div>` + books.map((b) => `<article class="card book">
             <div class="book-spine" aria-hidden="true"></div>
@@ -1253,12 +1299,15 @@
       return;
     }
 
+    /* --- Scripture (Blended & Christian paths) --- */
+    if (G.tab === "scripture") { panel.innerHTML = scriptureHTML(q); return; }
+
     /* --- Deepen gate --- */
     if (G.tab === "deepen" && !deepAllowed()) {
       panel.innerHTML = `<div class="card gate">
         <div class="sigil" aria-hidden="true"></div>
         <h2>For those ready to go deeper</h2>
-        <p class="muted">Deepen holds advanced material: mantra and chant, breath retention, herbal allies, energetic protection, and creative channels. It opens at Intermediate level, or after a 30-day streak.</p>
+        <p class="muted">Deepen holds advanced material: ${christian() ? "breath for the inward journey, herbal allies, guarding your attention" : "mantra and chant, breath retention, herbal allies, energetic protection"}, and creative channels. It opens at Intermediate level, or after a 30-day streak.</p>
         <p class="muted">You know your own readiness. If your foundation is steady, you may open it now.</p>
         <div class="btn-row" style="justify-content:center">
           <button class="btn btn-primary" data-unlock>I'm ready — open Deepen</button>
@@ -1270,8 +1319,8 @@
     const focusId = day().focus?.id;
     const match = (i) => !q || itemText(i).includes(q);
     const section = C.GUIDE[G.tab];
-    const cats = section.categories.map((cat) => {
-      const items = cat.items.filter((i) => i.tracks.includes(track) && match(i));
+    const cats = section.categories.filter((cat) => !hiddenFor("guideCats", cat.name)).map((cat) => {
+      const items = cat.items.filter((i) => i.tracks.includes(track) && match(i) && !hiddenFor("guide", i.id));
       if (!items.length) return "";
       return `<div class="cat-head"><h2>${esc(cat.name)}</h2><p>${esc(cat.sub)}</p></div>` +
         (cat.figure === "planetary-hand" && !q ? handFigure() : "") +
@@ -1285,7 +1334,7 @@
 
     let empty = "";
     if (!cats) {
-      const other = ["build", "apply", "deepen"].find((t) => t !== G.tab && guideItems().some((i) => i.tab === t && match(i)) && (t !== "deepen" || deepAllowed()));
+      const other = ["build", "apply", "deepen", ...(scriptureOn() ? ["scripture"] : [])].find((t) => t !== G.tab && guideItems().some((i) => i.tab === t && match(i)) && (t !== "deepen" || deepAllowed()));
       empty = `<p class="empty">Nothing in ${GTAB_NAMES[G.tab]} matches “${esc(G.query)}”.${other ? ` Try the ${GTAB_NAMES[other]} tab.` : ""}</p>`;
     }
     panel.innerHTML = (q ? "" : `<p class="guide-intro">${esc(section.intro)}</p>`) + lessonBtn + (cats || empty);
@@ -1335,6 +1384,7 @@
       </button>
       <div class="g-body" id="g-${i.id}" ${open ? "" : "hidden"}>
         <p class="g-why">${esc(pick(i.why))}</p>
+        ${i.refs && scriptureOn() ? `<div class="g-verses">${i.refs.map(verseHTML).join("")}</div>` : ""}
         <p class="g-label">${esc(labels.steps)}</p>
         <ol class="g-steps">${steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
         <p class="g-label">${esc(labels.cue)}</p>
@@ -1360,7 +1410,8 @@
       t.addEventListener("keydown", (e) => {
         if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
         e.preventDefault();
-        const next = tabs[(idx + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+        const vis = tabs.filter((x) => !x.hidden), at = vis.indexOf(t);
+        const next = vis[(at + (e.key === "ArrowRight" ? 1 : -1) + vis.length) % vis.length];
         G.tab = next.dataset.gtab; renderGuide(); next.focus();
       });
     });
@@ -1401,6 +1452,7 @@
       if (t) {
         const item = guideItems().find((i) => i.id === t.dataset.gtool);
         if (item.tool.type === "mala") openMala(item.tool.mantra);
+        else if (item.tool.type === "rope") openMala(item.tool.mantra, 100);
         else openPacer(item.tool.pattern);
       }
       if (e.target.closest("[data-unlock]")) {
@@ -1410,7 +1462,66 @@
       }
       const ls = e.target.closest("[data-glesson]");
       if (ls) { go("library"); openLesson(ls.dataset.glesson); }
+      const st = e.target.closest("[data-struggle]");
+      if (st) {
+        G.struggle = G.struggle === st.dataset.struggle ? null : st.dataset.struggle;
+        renderGuide();
+        const again = $(`[data-struggle="${st.dataset.struggle}"]`); again && again.focus();
+        if (G.struggle) $("#struggle-verse")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+      const tp = e.target.closest("[data-tpacer]");
+      if (tp) openPacer(tp.dataset.tpacer);
+      const tg = e.target.closest("[data-tguide]");
+      if (tg) openGuideItem(tg.dataset.tguide);
     });
+  }
+  /** Switch to the tab holding a Guide item, open it and bring it into view. */
+  function openGuideItem(id) {
+    const item = guideItems().find((i) => i.id === id);
+    if (!item) return;
+    G.tab = item.tab; G.query = ""; $("#guide-search").value = ""; G.open.add(id);
+    renderGuide();
+    setTimeout(() => { const t = $(`[data-gopen="${id}"]`); t && (t.scrollIntoView({ block: "center" }), t.focus()); }, 60);
+  }
+
+  /** Guide › Scripture: verses for hard moments, the teachings cross-referenced, Christian practices. */
+  function scriptureHTML(q) {
+    const S = C.SCRIPTURE, track = state.profile.track;
+    const has = (txt) => !q || txt.toLowerCase().includes(q);
+    const struggles = S.STRUGGLES.filter((x) => has(x.name + " " + x.refs.map(verseText).join(" ")));
+    const cur = S.STRUGGLES.find((x) => x.id === G.struggle);
+    const sHTML = struggles.length ? `<div class="cat-head" id="struggles-head"><h2>When you're struggling</h2><p>Tap what you're facing for a word to hold onto.</p></div>
+      <div class="struggles" role="group" aria-label="What you're facing">${struggles.map((x) =>
+        `<button class="chip" data-struggle="${x.id}" aria-pressed="${G.struggle === x.id}" aria-controls="struggle-verse">${esc(x.name)}</button>`).join("")}</div>
+      <div id="struggle-verse" aria-live="polite">${cur ? `<div class="card struggle-card"><p class="eyebrow">${esc(cur.name)}</p>${cur.refs.map(verseHTML).join("")}
+        <p class="hint" style="margin:10px 0 0">Read it slowly, twice. Then breathe it: in on the first half, out on the second.</p></div>` : ""}</div>
+      <p class="g-source">${esc(S.STRUGGLES_CREDIT)}</p>` : "";
+    const teachLink = (t) => {
+      const l = t.link; if (!l) return "";
+      if (l.type === "lesson") { const les = C.LESSONS.find((x) => x.id === l.id); return les && !hiddenFor("lessons", l.id) && lessonAllowed(les) ? `<div class="g-actions"><button class="btn" data-glesson="${l.id}">Read the lesson</button></div>` : ""; }
+      if (l.type === "pacer") return `<div class="g-actions"><button class="btn btn-primary" data-tpacer="${l.id}">Pray it with the breath</button></div>`;
+      if (l.type === "guide") return guideItems().some((i) => i.id === l.id) ? `<div class="g-actions"><button class="btn" data-tguide="${l.id}">See the practice</button></div>` : "";
+      return "";
+    };
+    const teach = S.TEACHINGS.filter((t) => has([t.title, t.teaching, t.text, ...t.refs.map(verseText)].join(" ")));
+    const tHTML = teach.length ? `<div class="cat-head"><h2>Sovereign's teachings in Scripture</h2><p>Each core teaching, read alongside the Bible.</p></div>` +
+      teach.map((t) => {
+        const open = G.open.has(t.id) || !!q;
+        return `<article class="card g-item teach">
+          <button class="g-toggle" data-gopen="${t.id}" aria-expanded="${open}" aria-controls="g-${t.id}">
+            <span class="g-title">${esc(t.title)}</span><span class="g-chev" aria-hidden="true">⌄</span>
+            <span class="g-meta"><span>${esc(t.teaching)}</span><span class="tag">${t.refs.length} ${t.refs.length === 1 ? "verse" : "verses"}</span></span></button>
+          <div class="g-body" id="g-${t.id}" ${open ? "" : "hidden"}><p class="g-why">${esc(t.text)}</p>
+            <div class="g-verses">${t.refs.map(verseHTML).join("")}</div>${teachLink(t)}</div></article>`;
+      }).join("") : "";
+    const focusId = day().focus?.id;
+    const cats = S.guide.categories.map((cat) => {
+      const items = cat.items.filter((i) => i.tracks.includes(track) && (!q || itemText(i).includes(q)));
+      if (!items.length) return "";
+      return `<div class="cat-head"><h2>${esc(cat.name)}</h2><p>${esc(cat.sub)}</p></div>` + items.map((i) => guideItemHTML(i, focusId === i.id)).join("");
+    }).join("");
+    const body = sHTML + tHTML + cats;
+    return (q ? "" : `<p class="guide-intro">${esc(S.guide.intro)}</p>`) + (body || `<p class="empty">Nothing in Scripture matches “${esc(G.query)}”.</p>`);
   }
 
   /** Home card for today's focus. */
@@ -1514,18 +1625,21 @@
   }
   /** First suggestion the member's track and level allow → { label, attr }. */
   function dcAction(acts) {
-    for (const a of acts || []) {
+    for (let a of acts || []) {
+      if (a.type === "pacer" && hiddenFor("pacer", a.id) && C.SCRIPTURE.SWAP[a.id]) a = { ...a, id: C.SCRIPTURE.SWAP[a.id] };
+      if (a.type === "protocol" && hiddenFor("protocols", a.id)) continue;
       if (a.type === "protocol") {
         const p = C.PROTOCOLS.find((x) => x.id === a.id);
         if (p && p.tracks.includes(state.profile.track) && protocolAllowed(p)) return { label: p.title, sub: `${p.minutes}-minute protocol`, attr: `data-dc-start="${p.id}"` };
       }
+      if (a.type === "pacer" && C.SCRIPTURE?.PACER[a.id]) return { label: C.SCRIPTURE.PACER[a.id].title, sub: "Breath prayer", attr: `data-dc-pacer="${a.id}"` };
       if (a.type === "pacer" && PACER_NAMES[a.id] && (BASIC_PATTERNS.includes(a.id) || deepAllowed())) return { label: PACER_NAMES[a.id], sub: "Breath & mantra", attr: `data-dc-pacer="${a.id}"` };
       if (a.type === "sound") {
         const p = C.SOUND.presets.find((x) => x.id === a.id);
         if (p) return { label: `${p.name} sound`, sub: `${p.band} · ${p.minutes} min`, attr: `data-dc-sound="${p.id}"` };
       }
       if (a.type === "lesson") {
-        const l = C.LESSONS.find((x) => lessonAllowed(x) && !state.lessons[x.id]);
+        const l = C.LESSONS.find((x) => lessonAllowed(x) && !state.lessons[x.id] && !hiddenFor("lessons", x.id));
         if (l) return { label: l.title, sub: `${l.minutes}-minute lesson`, attr: `data-dc-lesson="${l.id}"` };
       }
       if (a.type === "journal") return { label: "Write it out in your journal", sub: "Journal", attr: "data-dc-journal" };
@@ -1717,6 +1831,11 @@
               elapsed: 0, lastTick: 0, minutes: 5, timer: null, mode: "breath",
               mala: { count: 0, mantra: "", started: 0 } };
   const BASIC_PATTERNS = ["so-hum", "nadi", "bhramari", "478", "aum"];
+  /** Look up a breath pattern; on the Christian path, other traditions' mantras become breath prayers. */
+  function pacerPattern(id) {
+    if (hiddenFor("pacer", id) && C.SCRIPTURE.SWAP[id]) id = C.SCRIPTURE.SWAP[id];
+    return (C.SCRIPTURE && C.SCRIPTURE.PACER[id]) || (C.PACER && C.PACER[id]) || null;
+  }
   const DEEP_PATTERNS = ["bija", "healing-sounds", "kumbhaka"];
 
   function logMinutes(practiceId, minutes) {
@@ -1731,7 +1850,7 @@
 
   async function openPacer(id) {
     try { await ensureGuide(); } catch { toast("Practice could not load. Connect once to download it."); return; }
-    const pat = C.PACER[id];
+    const pat = pacerPattern(id);
     if (!pat) return;
     Object.assign(P, { pattern: pat, id, mode: "breath", running: false, elapsed: 0 });
     $("#pacer-title").textContent = pat.title;
@@ -1831,11 +1950,13 @@
   }
 
   /* --- Mala counter --- */
-  async function openMala(mantra) {
-    Object.assign(P, { mode: "mala", mala: { count: 0, mantra: mantra || "Om Namah Shivaya", started: Date.now() } });
-    $("#pacer-eyebrow").textContent = "Japa";
-    $("#pacer-title").textContent = "108 Repetitions";
-    $("#pacer-note").textContent = "One repetition per tap. Begin aloud, then whisper, then repeat silently.";
+  async function openMala(mantra, total = 108) {
+    if (total === 108 && christian()) { mantra = C.SCRIPTURE.ROPE_PRAYER; total = 100; }
+    const rope = total === 100;
+    Object.assign(P, { mode: "mala", mala: { count: 0, total, rope, mantra: mantra || "Om Namah Shivaya", started: Date.now() } });
+    $("#pacer-eyebrow").textContent = rope ? "Prayer Rope" : "Japa";
+    $("#pacer-title").textContent = rope ? "100 Prayers" : "108 Repetitions";
+    $("#pacer-note").textContent = rope ? "One prayer per tap, one knot of the rope. Begin aloud, then whisper, then pray silently." : "One repetition per tap. Begin aloud, then whisper, then repeat silently.";
     $("#pacer-setup").hidden = true;
     $("#pacer-run").hidden = true;
     $("#mala-run").hidden = false;
@@ -1849,16 +1970,18 @@
   function updateMala() {
     const n = P.mala.count;
     $("#mala-count").textContent = n;
-    $("#mala-tap").setAttribute("aria-label", `Count repetition. ${n} of 108.`);
-    $("#mala-ring").style.strokeDashoffset = String(565.49 * (1 - n / 108));
+    const total = P.mala.total || 108;
+    $("#mala-tap").setAttribute("aria-label", `Count ${P.mala.rope ? "prayer" : "repetition"}. ${n} of ${total}.`);
+    $("#mala-ring").style.strokeDashoffset = String(565.49 * (1 - n / total));
   }
   function malaTap() {
-    if (P.mala.count >= 108) return;
+    const total = P.mala.total || 108;
+    if (P.mala.count >= total) return;
     P.mala.count++;
     if (navigator.vibrate) navigator.vibrate(12);
-    if (P.mala.count % 27 === 0 && state.settings.pacerSound !== false) chime(432, 1.6, 0.85);
+    if (P.mala.count % (total / 4) === 0 && state.settings.pacerSound !== false) chime(432, 1.6, 0.85);
     updateMala();
-    if (P.mala.count === 108) setTimeout(() => finishMala(true), 400);
+    if (P.mala.count === total) setTimeout(() => finishMala(true), 400);
   }
   function finishMala(complete) {
     const mins = Math.round((Date.now() - P.mala.started) / 60000);
@@ -1869,7 +1992,7 @@
     if (count >= 27 || mins >= 3) {
       const fresh = logMinutes("meditation", Math.max(1, mins));
       chime(528, 2.4);
-      toast(`${complete ? "Full mala complete" : `${count} repetitions`} · ${Math.max(1, mins)} min meditation logged${fresh ? ` · +${C.POINTS.practice}` : ""}`);
+      toast(`${complete ? (P.mala.rope ? "Prayer rope complete" : "Full mala complete") : `${count} ${P.mala.rope ? "prayers" : "repetitions"}`} · ${Math.max(1, mins)} min meditation logged${fresh ? ` · +${C.POINTS.practice}` : ""}`);
       render(); checkMilestones();
     }
   }
@@ -1891,7 +2014,7 @@
     $("#pacer-close").addEventListener("click", closePacer);
     $("#mala-tap").addEventListener("click", malaTap);
     $("#mala-undo").addEventListener("click", () => { if (P.mala.count > 0) { P.mala.count--; updateMala(); } });
-    $("#mala-finish").addEventListener("click", () => finishMala(P.mala.count >= 108));
+    $("#mala-finish").addEventListener("click", () => finishMala(P.mala.count >= (P.mala.total || 108)));
     $("#mala-mantra").addEventListener("change", (e) => { P.mala.mantra = e.target.value.trim() || "Om Namah Shivaya"; });
 
     // Protocols tab shortcut list
@@ -1899,6 +2022,7 @@
       const b = e.target.closest("[data-pacer]");
       if (!b) return;
       if (b.dataset.pacer === "mala") openMala();
+      else if (b.dataset.pacer === "rope") openMala(C.SCRIPTURE.ROPE_PRAYER, 100);
       else openPacer(b.dataset.pacer);
     });
   }
@@ -2158,7 +2282,9 @@
   const cal = { year: new Date().getFullYear(), month: new Date().getMonth(), selected: null };
 
   function renderJournal() {
-    $("#journal-prompt").textContent = C.PROMPTS[dayIndex() % C.PROMPTS.length];
+    $("#journal-prompt").textContent = scriptureOn() && (christian() || dayIndex() % 2 === 1)
+      ? C.SCRIPTURE.PROMPTS[dayIndex() % C.SCRIPTURE.PROMPTS.length]
+      : C.PROMPTS[dayIndex() % C.PROMPTS.length];
     const ta = $("#journal-text");
     if (document.activeElement !== ta) ta.value = secOn() ? draftPlain : (state.draft || "");
     renderCalendar();
@@ -2281,12 +2407,20 @@
         <input type="text" id="set-name" maxlength="40" value="${esc(p.name)}"></div>
       <div class="setting-group"><h3>Track</h3>${seg("track", [["men", "Men"], ["women", "Women"]], p.track)}</div>
       <div class="setting-group"><h3>Level</h3>${seg("level", LEVELS.map((l) => [l, cap(l)]), p.level)}</div>
+      <div class="setting-group"><h3>Faith &amp; Scripture</h3>
+        ${seg("faith", [["open", "Open"], ["blended", "Blended"], ["christian", "Christian"]], faith())}
+        ${faith() !== "open" ? `<p class="field-label" style="margin:14px 0 6px">Bible translation</p>
+          ${seg("translation", [["kjv", "King James"], ["web", "World English"]], translation())}` : ""}
+        <p class="hint" style="margin-top:10px">${faith() === "christian" ? "Sovereign is grounded in Scripture and Christian prayer. Practices from other traditions are set aside, and Christian breath prayers take their place."
+          : faith() === "blended" ? "The full practice, with Scripture and Christian prayer alongside it, and a verse every other day on Home."
+          : "The practice as taught, drawing on Taoist, yogic and esoteric sources. Choose Blended or Christian to add Scripture and Christian prayer."}
+          ${faith() !== "open" ? " Both translations are in the public domain. The King James uses “the LORD”, and the World English Bible is in modern English." : ""}</p></div>
       <div class="setting-group"><h3>Gentle reminders</h3>
         ${seg("reminders", [["on", "On"], ["off", "Off"]], state.settings.reminders === false ? "off" : "on")}
         <label class="field" style="margin:14px 0 10px"><span class="field-label">Daily practice reminder</span>
           <input type="time" id="set-reminder" value="${esc(p.reminder || "")}"></label>
         <p class="field-label" style="margin-bottom:6px">Reminder sound</p>
-        <div class="btn-row" style="align-items:center">${seg("reminderSound", [["om", "Om"], ["silent", "Silent"]], state.settings.reminderSound === "silent" ? "silent" : "om")}
+        <div class="btn-row" style="align-items:center">${seg("reminderSound", christian() ? [["bell", "Bell"], ["silent", "Silent"]] : [["om", "Om"], ["bell", "Bell"], ["silent", "Silent"]], reminderSound())}
           <button class="link-btn" id="set-om-preview">Preview</button></div>
         <p class="hint" style="margin-top:10px">Nothing is ever scheduled for you. At most two a day: your daily practice reminder (leave blank for none), and a focus reminder only if you add one on Home. Each is skipped if it's already done.
           Times follow this device's time zone (${esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "local time")}).
@@ -2340,6 +2474,14 @@
         else if (set === "reminderSound") state.settings.reminderSound = val;
         else if (set === "duckSessions") state.settings.duckSessions = val === "on";
         else if (set === "discreet") state.settings.discreet = val === "on";
+        else if (set === "faith" || set === "translation") {
+          state.settings[set] = val;
+          if (set === "faith") { if (val === "christian" && state.settings.reminderSound !== "silent") state.settings.reminderSound = "bell"; G.tab = val === "christian" ? "scripture" : "build"; G.open.clear(); }
+          save(); renderSettingsBody();
+          toast(set === "faith" ? ({ open: "Open path", blended: "Blended path: Scripture added", christian: "Christian path" })[val] : `Bible: ${C.SCRIPTURE.TRANSLATIONS[val]}`);
+          $(`[data-set="${set}"][data-val="${val}"]`)?.focus();
+          return;
+        }
         else if (set === "daycycle") { state.daycycle.on = val === "on"; refreshBriefs(); save(); renderSettingsBody(); toast(val === "on" ? "Daycycle is on" : "Daycycle is off"); if (val === "on" && !dcDob()) $("#set-dc-dob")?.focus(); return; }
         else if (set === "autoLock") { state.security.autoLock = Number(val); setGrace(); }
         else state.profile[set] = val;
@@ -2348,7 +2490,7 @@
         $$(`[data-set="${set}"]`, body).forEach((x) => x.setAttribute("aria-pressed", x.dataset.val === val));
         toast(set === "discreet" ? (val === "on" ? "Notifications are discreet" : "Notifications show details") : set === "autoLock" ? (val === "0" ? "Locks whenever Sovereign is closed" : `Locks after ${val} minutes away`) : set === "duckSessions" ? (val === "on" ? "Frequencies will dip during cues" : "Frequencies stay steady") : set === "reminders" ? `Reminders ${val}` : set === "reminderSound" ? `Reminder sound: ${cap(val)}` : `${cap(set)} set to ${cap(val)}`);
       }
-      if (b.id === "set-om-preview") { b.disabled = true; SovSound.playOm(0.8).finally(() => (b.disabled = false)); }
+      if (b.id === "set-om-preview") { const k = reminderSound() === "silent" ? (christian() ? "bell" : "om") : reminderSound(); b.disabled = true; SovSound.playReminder(k, 0.8).finally(() => (b.disabled = false)); }
       if (b.id === "set-export") exportData();
       if (b.id === "sec-on") enableLock();
       if (b.id === "sec-change") changeLock();
@@ -2584,8 +2726,8 @@
   }
   /** Play the Om (unless silent) and show a system notification if allowed. Website only. */
   function deliverReminder(title, body, tag) {
-    const om = state.settings.reminderSound !== "silent";
-    if (om && window.SovSound) SovSound.playOm(0.8).catch(() => {});
+    const kind = reminderSound(), om = kind !== "silent";
+    if (om && window.SovSound) SovSound.playReminder(kind, 0.8).catch(() => {});
     if ("Notification" in window && Notification.permission === "granted") {
       const opts = { body, icon: "icons/icon-192.png", tag, silent: om };
       navigator.serviceWorker?.ready
@@ -2640,6 +2782,7 @@
       b.addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("index.html?full=1") }));
     }
     if (IS_FULL) document.body.classList.add("full-view");
+    if (christian()) G.tab = "scripture";
     bindHome(); bindBanners(); bindGuide(); bindFocus(); bindDaycycle(); bindPacer(); bindSound(); bindCueSliders(); bindTimer(); bindLibrary(); bindJournal(); bindSettings();
     $$(".nav-btn").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
     go("home");

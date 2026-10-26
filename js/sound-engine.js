@@ -302,6 +302,39 @@
     return D + 2.4; // including reverb tail
   }
 
+  /** A gentle church bell: three slow strikes with the inharmonic partials of a
+      cast bell (hum, prime, minor-third tierce, quint, nominal), each fading at
+      its own rate. Used for reminders on the Christian path. */
+  function bell(ctx, dest, { t0 = ctx.currentTime + 0.05, volume = 0.5, pitch = 392 } = {}) {
+    const out = ctx.createGain(); out.gain.value = volume;
+    const dry = ctx.createGain(); dry.gain.value = 0.75;
+    const wet = ctx.createGain(); wet.gain.value = 0.4;
+    const verb = ctx.createConvolver(); verb.buffer = reverbImpulse(ctx);
+    out.connect(dry).connect(dest); out.connect(verb).connect(wet).connect(dest);
+    const PARTIALS = [[0.5, 0.35, 5.5], [1, 0.5, 4.2], [1.19, 0.32, 3.4], [1.5, 0.16, 2.6], [2, 0.3, 2.2], [2.5, 0.1, 1.4], [3.0, 0.08, 1.0], [4.07, 0.05, 0.6]];
+    const STRIKES = [0, 2.6, 5.2];
+    STRIKES.forEach((st, si) => {
+      const s0 = t0 + st, level = si === 2 ? 0.8 : 1;
+      PARTIALS.forEach(([ratio, g, decay]) => {
+        const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = pitch * ratio;
+        const env = ctx.createGain();
+        env.gain.setValueAtTime(0.0001, s0);
+        env.gain.exponentialRampToValueAtTime(g * level, s0 + 0.008);
+        env.gain.exponentialRampToValueAtTime(0.0001, s0 + decay * 1.6);
+        o.connect(env).connect(out); o.start(s0); o.stop(s0 + decay * 1.6 + 0.05);
+      });
+    });
+    return STRIKES[2] + 5.5 * 1.6 + 1.5;
+  }
+
+  /** Play a reminder sound ("om" or "bell") on its own short-lived context. */
+  function playReminder(kind = "om", volume = 0.8) {
+    const AC = root.AudioContext || root.webkitAudioContext;
+    const ctx = new AC();
+    const dur = (kind === "bell" ? bell : om)(ctx, ctx.destination, { volume: kind === "bell" ? volume * 0.7 : volume });
+    return new Promise((res) => setTimeout(() => { try { ctx.close(); } catch (_) {} res(); }, dur * 1000 + 200));
+  }
+
   /** Play an Om now on its own short-lived context. Resolves when it has finished. */
   function playOm(volume = 0.8) {
     const AC = root.AudioContext || root.webkitAudioContext;
@@ -310,5 +343,5 @@
     return new Promise((res) => setTimeout(() => { try { ctx.close(); } catch (_) {} res(); }, dur * 1000 + 200));
   }
 
-  root.SovSound = { Session, headphoneCheck, om, playOm, FADE_IN, FADE_OUT };
+  root.SovSound = { Session, headphoneCheck, om, bell, playOm, playReminder, FADE_IN, FADE_OUT };
 })(typeof window !== "undefined" ? window : self);

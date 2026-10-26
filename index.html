@@ -27,6 +27,7 @@
   <script src="js/content.js" defer></script>
   <script src="js/protocols.js" defer></script>
   <script src="content/daycycle.js" defer></script>
+  <script src="content/scripture.js" defer></script>
   <script src="js/sound-engine.js" defer></script>
   <script src="js/app.js" defer></script>
 </head>
@@ -88,8 +89,29 @@
         <button class="btn btn-primary" id="ob-next-3" disabled>Continue</button>
       </div>
 
-      <!-- Step 4: name + reminder -->
+      <!-- Step 4: faith path -->
       <div class="ob-step" data-step="4" hidden>
+        <h2 class="ob-q">How would you like to practise?</h2>
+        <div class="choice-grid" role="radiogroup" aria-label="Way of practice">
+          <button class="choice" role="radio" aria-checked="false" data-faith="open">
+            <span class="choice-title">Open</span>
+            <span class="choice-sub">The practice as taught, drawing on Taoist, yogic and esoteric sources</span>
+          </button>
+          <button class="choice" role="radio" aria-checked="false" data-faith="blended">
+            <span class="choice-title">Blended</span>
+            <span class="choice-sub">The full practice, with Scripture and Christian prayer alongside it</span>
+          </button>
+          <button class="choice" role="radio" aria-checked="false" data-faith="christian">
+            <span class="choice-title">Christian</span>
+            <span class="choice-sub">Grounded in Scripture and Christian prayer. Practices from other traditions are set aside</span>
+          </button>
+        </div>
+        <p class="hint">You can change this any time in Settings.</p>
+        <button class="btn btn-primary" id="ob-next-4" disabled>Continue</button>
+      </div>
+
+      <!-- Step 5: name + reminder -->
+      <div class="ob-step" data-step="5" hidden>
         <h2 class="ob-q">What shall we call you?</h2>
         <label class="field">
           <span class="field-label">Your name or chosen sovereign name</span>
@@ -203,6 +225,7 @@
         <h1 class="view-title" id="guide-h">Guide</h1>
         <p class="view-sub">Build the energy, apply it in your life, go deeper, and keep reading.</p>
         <div class="tabs" role="tablist" aria-label="Guide sections">
+          <button class="tab" role="tab" id="tab-scripture" aria-controls="guide-panel" aria-selected="false" data-gtab="scripture" tabindex="-1" hidden>Scripture</button>
           <button class="tab" role="tab" id="tab-build" aria-controls="guide-panel" aria-selected="true" data-gtab="build">Build</button>
           <button class="tab" role="tab" id="tab-apply" aria-controls="guide-panel" aria-selected="false" data-gtab="apply" tabindex="-1">Apply</button>
           <button class="tab" role="tab" id="tab-deepen" aria-controls="guide-panel" aria-selected="false" data-gtab="deepen" tabindex="-1">Deepen</button>

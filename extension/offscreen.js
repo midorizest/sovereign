@@ -43,7 +43,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     return false;
   }
   if (msg.type === "om") {
-    SovSound.playOm(0.8).then(() => reply({ ok: true })).catch(() => reply({ ok: false }));
+    SovSound.playReminder(msg.kind === "bell" ? "bell" : "om", 0.8).then(() => reply({ ok: true })).catch(() => reply({ ok: false }));
     return true; // reply when the Om has finished
   }
   if (msg.type === "status") {

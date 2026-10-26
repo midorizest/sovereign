@@ -21,7 +21,7 @@ OUT = ROOT / "dist" / "sovereign-extension"
 SHARED = [
     "index.html", "css/styles.css", "js/content.js", "js/app.js", "js/security.js", "js/sound-engine.js", "js/noise-worklet.js",
     "content/lesson-what-is-sexual-energy.js", "content/lesson-energetic-signature.js",
-    "content/guide.js", "content/deepen.js", "content/daycycle.js",
+    "content/guide.js", "content/deepen.js", "content/daycycle.js", "content/scripture.js",
     "js/protocols.js", "content/hand.js", "content/lesson-science-of-retention.js", "content/lesson-grounding-bioelectricity.js", "content/lesson-role-of-breathwork.js", "content/lesson-transmutation.js", "content/lesson-esoteric-principles.js", "content/lesson-pitfalls.js", "content/lesson-akashic-window.js", "content/lesson-planetary-hand.js",
     "icons/icon-192.png", "icons/icon-512.png", "icons/icon.svg",
     "fonts/cormorant-garamond.woff", "fonts/cormorant-garamond-italic.woff",
