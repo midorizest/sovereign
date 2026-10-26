@@ -843,3 +843,12 @@ dialog { border-color: var(--hairline); box-shadow: var(--shadow-lift), var(--be
 .verse-eyebrow { margin-bottom: 10px; }
 .quote-card .verse-help { margin-top: 12px; font-size: .88rem; }
 .g-item.teach .g-meta span:first-child { font-style: italic; }
+
+/* v1.12 — Daycycle in setup and on Home */
+.dc-waves { display: block; width: 100%; max-width: 320px; height: auto; margin: -6px auto 16px; }
+.dc-waves path { fill: none; stroke-width: 2.2; stroke-linecap: round; }
+.ob-lead { color: var(--muted); margin: 0 0 18px; }
+.ob-skip { display: block; margin: 12px auto 0; }
+.dc-intro h2 { margin-bottom: 8px; }
+.dc-intro .dc-fields { margin-top: 16px; }
+.ob-step .dc-fields { margin-bottom: 12px; }

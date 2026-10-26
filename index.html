@@ -110,8 +110,22 @@
         <button class="btn btn-primary" id="ob-next-4" disabled>Continue</button>
       </div>
 
-      <!-- Step 5: name + reminder -->
+      <!-- Step 5: Daycycle (optional) -->
       <div class="ob-step" data-step="5" hidden>
+        <h2 class="ob-q">Plan your day by your cycles?</h2>
+        <svg class="dc-waves" viewBox="0 0 300 70" aria-hidden="true"><path d="M0 35 C25 5 50 5 75 35 S125 65 150 35 S200 5 225 35 S275 65 300 35" style="stroke:var(--cy-phy)"/><path d="M0 50 C35 15 70 15 105 40 S175 65 210 30 S265 10 300 25" style="stroke:var(--cy-emo)"/><path d="M0 20 C40 20 70 60 120 55 S200 10 250 20 S290 45 300 50" style="stroke:var(--cy-int)"/></svg>
+        <p class="ob-lead">Daycycle reads three natural rhythms from your birth date (physical, emotional and intellectual) and suggests how to shape each day, with a practice for every part of it.</p>
+        <div class="dc-fields">
+          <label class="field"><span class="field-label">Birth date</span><input type="date" id="ob-dob"></label>
+          <label class="field"><span class="field-label">Usual wake time</span><input type="time" id="ob-wake" value="07:00"></label>
+        </div>
+        <p class="hint">Optional. Your birth date stays on this device. Biorhythms aren't scientifically proven, so an evening check-in shows how well they match you. You can change this any time in Settings.</p>
+        <button class="btn btn-primary" id="ob-dc-on" disabled>Turn on Daycycle</button>
+        <button class="link-btn ob-skip" id="ob-dc-skip">Not now</button>
+      </div>
+
+      <!-- Step 6: name + reminder -->
+      <div class="ob-step" data-step="6" hidden>
         <h2 class="ob-q">What shall we call you?</h2>
         <label class="field">
           <span class="field-label">Your name or chosen sovereign name</span>

@@ -24,7 +24,7 @@
 (() => {
   "use strict";
   const C = window.SOV; // content from content.js
-  const APP_VERSION = "1.11.0";
+  const APP_VERSION = "1.12.0";
   const STORAGE_KEY = "sovereign.v1";
 
   /* Platform: the same code runs as a website/PWA and as a Chrome extension.
@@ -517,6 +517,13 @@
     radioGroup($$("[data-faith]"), (el) => { ob.faith = el.dataset.faith; $("#ob-next-4").disabled = false; });
     $("#ob-next-4").addEventListener("click", () => showStep(5));
 
+    // Daycycle: optional, offered once during setup.
+    const dobOk = () => { const v = $("#ob-dob").value; return !!v && v <= todayKey() && v >= "1900-01-01"; };
+    $("#ob-dob").max = todayKey();
+    $("#ob-dob").addEventListener("input", () => ($("#ob-dc-on").disabled = !dobOk()));
+    $("#ob-dc-on").addEventListener("click", () => { if (!dobOk()) return; ob.dc = { dob: $("#ob-dob").value, wake: $("#ob-wake").value || "07:00" }; showStep(6); });
+    $("#ob-dc-skip").addEventListener("click", () => { ob.dc = null; showStep(6); });
+
     $("#ob-name").addEventListener("input", (e) => ($("#ob-finish").disabled = !e.target.value.trim()));
     $("#ob-name").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.value.trim()) finishOnboarding(); });
     $("#ob-finish").addEventListener("click", finishOnboarding);
@@ -552,6 +559,8 @@
       createdAt: new Date().toISOString()
     };
     state.settings.faith = ob.faith || "open";
+    state.daycycle.introSeen = true;
+    if (ob.dc) Object.assign(state.daycycle, { on: true, dob: ob.dc.dob, wake: ob.dc.wake });
     if (state.settings.faith === "christian") { state.settings.reminderSound = "bell"; G.tab = "scripture"; }
     save();
     if (state.profile.reminder) requestNotifyPermission();
@@ -1673,7 +1682,20 @@
   function renderDaycycleCard() {
     const el = $("#daycycle-card");
     if (!el) return;
-    if (!state.daycycle.on || !DC()) { el.innerHTML = ""; return; }
+    if (!DC()) { el.innerHTML = ""; return; }
+    if (!state.daycycle.on) {
+      el.innerHTML = state.daycycle.introSeen ? "" : `<div class="card dc-card dc-intro">
+        <p class="eyebrow">New · Daycycle</p>
+        <h2>Plan your day by your cycles</h2>
+        <p class="muted">Three natural rhythms from your birth date (physical, emotional and intellectual), with a practice suggested for each part of your day. Optional, and it stays on this device.</p>
+        <div class="dc-fields">
+          <label class="field"><span class="field-label">Birth date</span><input type="date" id="dc-intro-dob" max="${todayKey()}"></label>
+          <label class="field"><span class="field-label">Usual wake time</span><input type="time" id="dc-intro-wake" value="${esc(state.daycycle.wake || "07:00")}"></label>
+        </div>
+        <div class="btn-row" style="margin-top:14px;align-items:center"><button class="btn btn-primary" data-dc-intro="on">Turn on Daycycle</button>
+          <button class="link-btn" data-dc-intro="skip">Not now</button></div></div>`;
+      return;
+    }
     if (!dcDob()) {
       el.innerHTML = `<div class="card dc-card dc-empty"><p class="eyebrow">Daycycle</p>
         <p>Add your birth date to see today's cycles and a plan for the day.</p>
@@ -1798,6 +1820,13 @@
       const inSheet = !$("#daycycle").hidden;
       const leave = () => { if (inSheet) closeDaycycle(); };
       if (b.hasAttribute("data-dc-open")) openDaycycle();
+      else if (b.dataset.dcIntro === "skip") { state.daycycle.introSeen = true; save(); renderDaycycleCard(); toast("You can turn on Daycycle any time in Settings."); }
+      else if (b.dataset.dcIntro === "on") {
+        const v = $("#dc-intro-dob").value;
+        if (!v || v > todayKey() || v < "1900-01-01") { toast("Enter your birth date first."); $("#dc-intro-dob").focus(); return; }
+        state.daycycle.on = true; state.daycycle.introSeen = true; state.daycycle.wake = $("#dc-intro-wake").value || "07:00";
+        setDob(v).then(() => { renderDaycycleCard(); toast("Daycycle is on"); $("#daycycle-card [data-dc-open]")?.focus(); });
+      }
       else if (b.hasAttribute("data-dc-setup")) { openSettings(); setTimeout(() => $("#set-dc-dob")?.focus(), 60); }
       else if (b.dataset.dcStart) { leave(); startTimer(b.dataset.dcStart); }
       else if (b.dataset.dcPacer) { leave(); openPacer(b.dataset.dcPacer); }
@@ -2482,7 +2511,7 @@
           $(`[data-set="${set}"][data-val="${val}"]`)?.focus();
           return;
         }
-        else if (set === "daycycle") { state.daycycle.on = val === "on"; refreshBriefs(); save(); renderSettingsBody(); toast(val === "on" ? "Daycycle is on" : "Daycycle is off"); if (val === "on" && !dcDob()) $("#set-dc-dob")?.focus(); return; }
+        else if (set === "daycycle") { state.daycycle.on = val === "on"; state.daycycle.introSeen = true; refreshBriefs(); save(); renderSettingsBody(); toast(val === "on" ? "Daycycle is on" : "Daycycle is off"); if (val === "on" && !dcDob()) $("#set-dc-dob")?.focus(); return; }
         else if (set === "autoLock") { state.security.autoLock = Number(val); setGrace(); }
         else state.profile[set] = val;
         if (set === "discreet") refreshBriefs();
