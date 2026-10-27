@@ -142,15 +142,31 @@
 
       this.t0 = now;
       this.timer = setInterval(() => this._tick(), 500);
+      // If the system suspends or interrupts audio (a call, another app, the
+      // phone saving power), try to pick up again as soon as it's allowed.
+      ctx.onstatechange = () => { if (!this.ending && ctx.state !== "running" && ctx.state !== "closed") this._kick(); };
       return this;
     }
+
+    _kick(delay = 300) {
+      clearTimeout(this._kt);
+      this._kt = setTimeout(() => { if (!this.ending && this.ctx && this.ctx.state !== "running" && this.ctx.state !== "closed") this.ctx.resume().catch(() => {}); }, delay);
+    }
+    /** Resume audio after the app returns to the foreground or regains audio focus. */
+    recover() {
+      if (this.ending || !this.ctx || this.ctx.state === "running" || this.ctx.state === "closed") return Promise.resolve(false);
+      return this.ctx.resume().then(() => true).catch(() => false);
+    }
+    get interrupted() { return !!(this.ctx && !this.ending && this.ctx.state !== "running"); }
 
     get elapsed() {
       return this.ctx ? this.offset + (this.ctx.currentTime - this.t0) : this.offset;
     }
 
     _tick() {
-      if (!this.ending && this.elapsed >= this.total - FADE_OUT) this.stop({ log: true, completed: true });
+      if (this.ending) return;
+      if (this.ctx.state !== "running") this._kick(0);
+      if (this.elapsed >= this.total - FADE_OUT) this.stop({ log: true, completed: true });
     }
 
     /** Briefly lower the session so a guidance chime can be heard clearly, then restore it. */
@@ -202,7 +218,7 @@
 
     status() {
       return {
-        presetId: this.preset.id, playing: !this.ended, ending: this.ending,
+        presetId: this.preset.id, playing: !this.ended, ending: this.ending, interrupted: this.interrupted,
         elapsed: this.elapsed, total: this.total, volume: this.volume, noise: this.noiseLevel,
         freqs: this.freqs
       };

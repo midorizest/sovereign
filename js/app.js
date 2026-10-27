@@ -24,7 +24,7 @@
 (() => {
   "use strict";
   const C = window.SOV; // content from content.js
-  const APP_VERSION = "1.12.0";
+  const APP_VERSION = "1.13.0";
   const STORAGE_KEY = "sovereign.v1";
 
   /* Platform: the same code runs as a website/PWA and as a Chrome extension.
@@ -95,7 +95,7 @@
     security: null,  // { enabled, salt, iter, check, autoLock, fails, waitUntil } when App lock is on
     // Daycycle (optional): birth date is encrypted (dobEnc) when App lock is on.
     // feel: evening check-ins (1–5); briefs: next days' reminder lines, kept only when notifications show details.
-    daycycle: { on: false, dob: "", dobEnc: null, wake: "07:00", feel: {}, briefs: {} }
+    daycycle: { on: false, dob: "", dobEnc: null, wake: "07:00", sleep: "22:30", planOpen: false, feel: {}, briefs: {} }
   });
 
   let state = blankState(); // filled in by loadState() during boot
@@ -384,6 +384,15 @@
   function bindNative() {
     if (!NATIVE) return;
     document.body.classList.add("native");
+    const NA = plugin("SovereignAudio");
+    try {
+      const h = NA && NA.addListener("action", ({ action }) => {
+        if (action === "pause") pauseSound();
+        else if (action === "play") resumeSound();
+        else if (action === "stop") soundStop();
+      });
+      h && h.catch && h.catch(() => {});
+    } catch (_) {}
     const App = plugin("App");
     App && App.addListener("backButton", () => {
       // Back closes whatever is open, then returns Home, then leaves the app.
@@ -521,7 +530,7 @@
     const dobOk = () => { const v = $("#ob-dob").value; return !!v && v <= todayKey() && v >= "1900-01-01"; };
     $("#ob-dob").max = todayKey();
     $("#ob-dob").addEventListener("input", () => ($("#ob-dc-on").disabled = !dobOk()));
-    $("#ob-dc-on").addEventListener("click", () => { if (!dobOk()) return; ob.dc = { dob: $("#ob-dob").value, wake: $("#ob-wake").value || "07:00" }; showStep(6); });
+    $("#ob-dc-on").addEventListener("click", () => { if (!dobOk()) return; ob.dc = { dob: $("#ob-dob").value, wake: $("#ob-wake").value || "07:00", sleep: $("#ob-sleep").value || "22:30" }; showStep(6); });
     $("#ob-dc-skip").addEventListener("click", () => { ob.dc = null; showStep(6); });
 
     $("#ob-name").addEventListener("input", (e) => ($("#ob-finish").disabled = !e.target.value.trim()));
@@ -560,7 +569,7 @@
     };
     state.settings.faith = ob.faith || "open";
     state.daycycle.introSeen = true;
-    if (ob.dc) Object.assign(state.daycycle, { on: true, dob: ob.dc.dob, wake: ob.dc.wake });
+    if (ob.dc) Object.assign(state.daycycle, { on: true, dob: ob.dc.dob, wake: ob.dc.wake, sleep: ob.dc.sleep });
     if (state.settings.faith === "christian") { state.settings.reminderSound = "bell"; G.tab = "scripture"; }
     save();
     if (state.profile.reminder) requestNotifyPermission();
@@ -1652,6 +1661,10 @@
         if (l) return { label: l.title, sub: `${l.minutes}-minute lesson`, attr: `data-dc-lesson="${l.id}"` };
       }
       if (a.type === "journal") return { label: "Write it out in your journal", sub: "Journal", attr: "data-dc-journal" };
+      if (a.type === "guide") {
+        const g = guideItems().find((x) => x.id === a.id);
+        if (g) return { label: pick(g.title), sub: `Guide · ${g.time}`, attr: `data-dc-guide="${g.id}"` };
+      }
     }
     return null;
   }
@@ -1660,9 +1673,25 @@
 
   function dcToday() {
     const t = dcT(), phase = dcPhase();
-    const blocks = DC().plan(t, { phase });
-    return { t, phase, blocks, read: DC().readings(t), head: DC().headline(t), key: DC().keyBlock(t, blocks) };
+    const blocks = DC().plan(t, { phase, scripture: scriptureOn() });
+    const key = DC().keyBlock(t, blocks), act = dcAction(key.act);
+    const sum = DC().summary(dcDob(), todayKey(), { phase, practice: act ? act.label : "",
+      history: Object.entries(state.daycycle.feel).map(([day, feel]) => ({ day, feel })), match: DC().match(dcDob(), state.daycycle.feel) });
+    return { t, phase, blocks, read: DC().readings(t), head: DC().headline(t), key, act, sum };
   }
+  /** Clock time for a plan block, placed between wake and sleep. */
+  const toMin = (hhmm) => { const [h, m] = (hhmm || "07:00").split(":").map(Number); return h * 60 + m; };
+  const fromMin = (x) => { x = ((Math.round(x) % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, "0")}:${String(x % 60).padStart(2, "0")}`; };
+  function dcTimes(blocks) {
+    const w = toMin(state.daycycle.wake || "07:00");
+    let sl = toMin(state.daycycle.sleep || "22:30"); if (sl <= w) sl += 1440;
+    const span = sl - w;
+    return blocks.map((b) => ({ ...b, min: b.at != null ? w + Math.min(b.at, span * 0.2) : b.before != null ? sl - Math.min(b.before, span * 0.25) : w + b.frac * span }))
+      .sort((a, b) => a.min - b.min);
+  }
+  /* On the Christian and Blended paths, a verse that fits the shape of the day. */
+  const DC_VERSES = { turn: ["Isaiah 26:3", "Psalm 46:10"], strong: ["Colossians 3:23", "Ephesians 2:10"], recharge: ["Isaiah 40:31", "Matthew 11:28-30"],
+    "lean-phy": ["Isaiah 40:29", "Isaiah 40:31"], "lean-emo": ["Psalm 42:11", "Philippians 4:6-7"], "lean-int": ["James 1:5-6", "Proverbs 4:23"] };
   function dcMeter(r, big) {
     const w = Math.abs(r.v) * 50;
     return `<div class="dc-read ${big ? "big" : ""}" style="--c:${DC_COLOR[r.k]}">
@@ -1691,6 +1720,7 @@
         <div class="dc-fields">
           <label class="field"><span class="field-label">Birth date</span><input type="date" id="dc-intro-dob" max="${todayKey()}"></label>
           <label class="field"><span class="field-label">Usual wake time</span><input type="time" id="dc-intro-wake" value="${esc(state.daycycle.wake || "07:00")}"></label>
+          <label class="field"><span class="field-label">Usual bedtime</span><input type="time" id="dc-intro-sleep" value="${esc(state.daycycle.sleep || "22:30")}"></label>
         </div>
         <div class="btn-row" style="margin-top:14px;align-items:center"><button class="btn btn-primary" data-dc-intro="on">Turn on Daycycle</button>
           <button class="link-btn" data-dc-intro="skip">Not now</button></div></div>`;
@@ -1702,42 +1732,54 @@
         <button class="btn" data-dc-setup>Add birth date</button></div>`;
       return;
     }
-    const d = dcToday(), act = dcAction(d.key.act), tom = DC().tomorrow(d.t);
+    const d = dcToday(), act = d.act, tom = DC().tomorrow(d.t);
     const evening = new Date().getHours() >= 17 || state.daycycle.feel[todayKey()];
     el.innerHTML = `<div class="card dc-card">
       <p class="eyebrow">Daycycle</p>
       <h2>${esc(d.head.h)}</h2>
+      <p class="dc-lead">${esc(d.sum.lead)}</p>
       <div class="dc-reads">${d.read.map((r) => dcMeter(r)).join("")}</div>
       ${d.phase ? `<p class="dc-phase">${esc(DC().PHASE[d.phase])}</p>` : ""}
       ${act ? `<p class="field-label" style="margin:14px 0 6px">Suggested for today</p>${dcActBtn(act, true)}` : ""}
       ${tom ? `<p class="dc-tomorrow"><span aria-hidden="true">◦</span> Tomorrow: ${esc(tom)}</p>` : ""}
       ${evening ? dcFeelHTML() : ""}
-      <button class="link-btn dc-open" data-dc-open>Plan my day</button></div>`;
+      <button class="link-btn dc-open" data-dc-open>Read my day</button></div>`;
   }
 
-  function openDaycycle() {
+  async function openDaycycle() {
+    try { await ensureGuide(); } catch (_) {} // some suggestions open Guide practices
     renderDaycycleBody();
     if ($("#daycycle").hidden) openOverlay($("#daycycle"), closeDaycycle);
   }
   function closeDaycycle() { closeOverlay($("#daycycle")); }
   function renderDaycycleBody() {
-    const d = dcToday(), wake = state.daycycle.wake || "07:00";
-    const at = (m) => { const [h, mi] = wake.split(":").map(Number); const x = (h * 60 + mi + m) % 1440; return fmtClock(`${String(Math.floor(x / 60)).padStart(2, "0")}:${String(x % 60).padStart(2, "0")}`); };
+    const d = dcToday(), wake = state.daycycle.wake || "07:00", sleep = state.daycycle.sleep || "22:30";
+    const timed = dcTimes(d.blocks), open = !!state.daycycle.planOpen;
+    const vRefs = scriptureOn() ? DC_VERSES[d.sum.theme] : null;
+    const vRef = vRefs ? vRefs[d.t % vRefs.length] : null;
     const up = DC().upcoming(dcDob(), todayKey(), 30, 8);
     const m = DC().match(dcDob(), state.daycycle.feel);
     const fmtD = (k) => parseKey(k).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
     $("#daycycle-body").innerHTML = `
       <p class="eyebrow">${fmtLongDate(new Date())}</p>
       <h3 class="dc-head">${esc(d.head.h)}</h3>
-      <p class="muted">${esc(d.head.s)}</p>
       <div class="dc-reads big">${d.read.map((r) => dcMeter(r, true)).join("")}</div>
-      ${d.phase ? `<p class="dc-phase">${esc(DC().PHASE[d.phase])}</p>` : ""}
 
-      <h4 class="dc-sec">How to run your day</h4>
-      <ol class="dc-plan">${d.blocks.map((b) => `<li style="--c:${DC_COLOR[b.k]}">
-        <span class="dc-when">${at(b.at)}</span><strong class="dc-what">${esc(b.what)}</strong>
-        <p>${esc(b.txt)}</p>${dcActBtn(dcAction(b.act))}</li>`).join("")}</ol>
-      <p class="hint">Times start from your wake time (${fmtClock(wake)}), which you can change in Settings.</p>
+      <h4 class="dc-sec">Your day in brief</h4>
+      <div class="dc-summary">${d.sum.paras.filter(Boolean).map((p) => `<p>${esc(p)}</p>`).join("")}</div>
+      ${d.act ? dcActBtn(d.act, true) : ""}
+      ${vRef ? verseHTML(vRef) : ""}
+
+      <button class="dc-plan-toggle" data-dc-plan aria-expanded="${open}" aria-controls="dc-plan">
+        <span><span class="dc-sec" style="margin:0">Plan by the hour</span>
+        <span class="muted small">${fmtClock(wake)} to ${fmtClock(sleep)}. For days you'd like more structure.</span></span>
+        <span class="g-chev" aria-hidden="true">⌄</span></button>
+      <div id="dc-plan" ${open ? "" : "hidden"}>
+        <ol class="dc-plan">${timed.map((b) => `<li style="--c:${DC_COLOR[b.k]}">
+          <span class="dc-when">${fmtClock(fromMin(b.min))}</span><strong class="dc-what">${esc(b.what)}</strong>
+          <p>${esc(b.txt)}</p>${dcActBtn(dcAction(b.act))}</li>`).join("")}</ol>
+        <p class="hint">Timed from your wake and sleep times, which you can change in Settings.</p>
+      </div>
 
       ${dcFeelHTML()}
 
@@ -1807,7 +1849,8 @@
       ${seg("daycycle", [["on", "On"], ["off", "Off"]], on ? "on" : "off")}
       ${on ? `<div class="dc-fields">
         <label class="field"><span class="field-label">Birth date</span><input type="date" id="set-dc-dob" max="${todayKey()}" value="${esc(dcDob())}"></label>
-        <label class="field"><span class="field-label">Usual wake time</span><input type="time" id="set-dc-wake" value="${esc(state.daycycle.wake || "07:00")}"></label></div>` : ""}
+        <label class="field"><span class="field-label">Usual wake time</span><input type="time" id="set-dc-wake" value="${esc(state.daycycle.wake || "07:00")}"></label>
+        <label class="field"><span class="field-label">Usual bedtime</span><input type="time" id="set-dc-sleep" value="${esc(state.daycycle.sleep || "22:30")}"></label></div>` : ""}
       <p class="hint" style="margin-top:10px">An optional way to plan your day with three classic biorhythm cycles (physical, emotional and intellectual) from your birth date, each matched to a Sovereign practice.
         Your birth date stays on this device${secOn() ? " and is encrypted with your passcode" : " and is encrypted when App lock is on"}. When reminder notifications show details, your daily reminder carries the day's brief.
         Biorhythms aren't scientifically proven, so an evening check-in shows how well it matches you.</p></div>`;
@@ -1824,7 +1867,7 @@
       else if (b.dataset.dcIntro === "on") {
         const v = $("#dc-intro-dob").value;
         if (!v || v > todayKey() || v < "1900-01-01") { toast("Enter your birth date first."); $("#dc-intro-dob").focus(); return; }
-        state.daycycle.on = true; state.daycycle.introSeen = true; state.daycycle.wake = $("#dc-intro-wake").value || "07:00";
+        state.daycycle.on = true; state.daycycle.introSeen = true; state.daycycle.wake = $("#dc-intro-wake").value || "07:00"; state.daycycle.sleep = $("#dc-intro-sleep").value || "22:30";
         setDob(v).then(() => { renderDaycycleCard(); toast("Daycycle is on"); $("#daycycle-card [data-dc-open]")?.focus(); });
       }
       else if (b.hasAttribute("data-dc-setup")) { openSettings(); setTimeout(() => $("#set-dc-dob")?.focus(), 60); }
@@ -1833,6 +1876,11 @@
       else if (b.dataset.dcSound) { leave(); openSoundPlayer(b.dataset.dcSound); }
       else if (b.dataset.dcLesson) { leave(); go("library"); openLesson(b.dataset.dcLesson); }
       else if (b.hasAttribute("data-dc-journal")) { leave(); go("journal"); }
+      else if (b.dataset.dcGuide) { leave(); go("guide"); openGuideItem(b.dataset.dcGuide); }
+      else if (b.hasAttribute("data-dc-plan")) {
+        state.daycycle.planOpen = !state.daycycle.planOpen; save();
+        $("#dc-plan").hidden = !state.daycycle.planOpen; b.setAttribute("aria-expanded", state.daycycle.planOpen);
+      }
       else if (b.dataset.dcFeel) {
         const n = Number(b.dataset.dcFeel), k = todayKey();
         if (state.daycycle.feel[k] === n) delete state.daycycle.feel[k]; else state.daycycle.feel[k] = n;
@@ -2097,6 +2145,7 @@
 
   /** Website only: the page logs its own finished sessions. */
   function onLocalEnd(r) {
+    setTimeout(refreshMini, 0);
     if (!r.log || r.minutes < 1) return;
     const fresh = logMinutes("meditation", r.minutes);
     toast(`${r.completed ? "Session complete" : "Session ended"} · ${r.minutes} min meditation logged${fresh ? ` · +${C.POINTS.practice}` : ""}`);
@@ -2218,26 +2267,38 @@
     catch (e) { console.warn(e); toast("Audio could not start on this device."); return; }
     setPlayerMode("playing");
     requestWakeLock();
+    refreshMini();
+  }
+  /* Pause, resume and stop work from status, not from which screen is open,
+     so the Sound player, the mini player and the phone's media notification
+     all control the same session. */
+  async function pauseSound() {
+    const st = await sndEngine.status();
+    if (!st) return;
+    const preset = presetById(st.presetId);
+    SND.userStopped = true;
+    SND.paused = { preset, elapsed: st.elapsed, opts: { minutes: st.total / 60, volume: st.volume, noise: st.noise } };
+    await sndEngine.stop({ log: false, fade: false });
+    if (SND.preset?.id === preset.id) setPlayerMode("paused");
+    refreshMini();
+  }
+  async function resumeSound() {
+    if (!SND.paused) return;
+    const { preset, elapsed, opts } = SND.paused;
+    SND.userStopped = false; SND.last = null;
+    try { await sndEngine.start(preset, { ...opts, offset: elapsed }); } catch { toast("Audio could not resume."); return; }
+    SND.paused = null; SND.preset = preset; SND.opts = { ...SND.opts, ...opts };
+    setPlayerMode("playing");
+    if (!$("#sound-player").hidden) startPoll();
+    refreshMini();
   }
   async function soundToggle() {
-    if (SND.mode === "playing") {
-      const st = await sndEngine.status();
-      SND.userStopped = true;
-      const opts = { minutes: SND.opts.minutes, volume: $("#sp-volume").value / 100, noise: $("#sp-noise").value / 100 };
-      SND.paused = { preset: SND.preset, elapsed: st ? st.elapsed : 0, opts };
-      await sndEngine.stop({ log: false, fade: false });
-      setPlayerMode("paused");
-    } else if (SND.mode === "paused" && SND.paused) {
-      const { preset, elapsed, opts } = SND.paused;
-      SND.userStopped = false; SND.last = null;
-      try { await sndEngine.start(preset, { ...opts, offset: elapsed }); } catch { toast("Audio could not resume."); return; }
-      SND.paused = null;
-      setPlayerMode("playing");
-    }
+    if (await sndEngine.status()) await pauseSound(); else await resumeSound();
   }
   async function soundStop() {
     SND.userStopped = true;
-    if (SND.mode === "paused" && SND.paused) {
+    const st = await sndEngine.status();
+    if (!st && SND.paused) {
       const mins = Math.round(SND.paused.elapsed / 60);
       SND.paused = null;
       if (mins >= 1) {
@@ -2245,19 +2306,77 @@
         toast(`${mins} min meditation logged${fresh ? ` · +${C.POINTS.practice}` : ""}`);
         render(); checkMilestones();
       }
-    } else {
+    } else if (st) {
       $("#sp-time").textContent = "Fading…";
+      $("#mp-sub").textContent = "Fading…";
       const r = await sndEngine.stop({ log: true, fade: true });
       if (EXT && r && r.minutes >= 1) toast(`${r.minutes} min meditation logged`);
     }
     SND.last = null;
     setPlayerMode("setup");
     releaseWakeLock();
+    refreshMini();
   }
+
+  /* ---- Mini player: above the navigation on every screen ---- */
+  let mpTimer = null, naState = "";
+  async function refreshMini() {
+    const el = $("#mini-player");
+    if (!el) return;
+    const st = await sndEngine.status();
+    const paused = st ? null : SND.paused;
+    const id = st?.presetId || paused?.preset.id;
+    const show = !!id && !$("#app").hidden;
+    el.hidden = !show;
+    document.body.classList.toggle("has-mini", show);
+    nativeAudioSync(st, paused, id && presetById(id));
+    if (!show) { clearInterval(mpTimer); mpTimer = null; return; }
+    const p = presetById(id);
+    const elapsed = st ? st.elapsed : paused.elapsed, total = st ? st.total : paused.opts.minutes * 60;
+    const left = Math.max(0, Math.ceil(total - elapsed));
+    $("#mp-glyph").textContent = p.glyph;
+    $("#mp-name").textContent = p.name;
+    if (!st || $("#mp-sub").textContent !== "Fading…") {
+      $("#mp-sub").textContent = st ? (st.interrupted ? "Reconnecting audio…" : st.ending ? "Fading…" : `${fmtTime(left)} left · ${p.band}`) : `Paused · ${fmtTime(left)} left`;
+    }
+    $("#mp-bar").style.width = `${Math.min(100, (elapsed / total) * 100)}%`;
+    el.classList.toggle("paused", !st);
+    $("#mp-toggle").setAttribute("aria-label", st ? `Pause ${p.name}` : `Resume ${p.name}`);
+    $("#mp-open").setAttribute("aria-label", `${p.name}, ${st ? "playing" : "paused"}, ${Math.floor(left / 60)} minutes left. Open the player.`);
+    if (!mpTimer) mpTimer = setInterval(refreshMini, 1000);
+  }
+  function bindMini() {
+    $("#mp-open").addEventListener("click", async () => {
+      const st = await sndEngine.status();
+      const id = st?.presetId || SND.paused?.preset.id;
+      if (id) openSoundPlayer(id);
+    });
+    $("#mp-toggle").addEventListener("click", soundToggle);
+    $("#mp-stop").addEventListener("click", soundStop);
+    // Coming back to the app: if the system paused the audio, pick it up again.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") { SND.local?.recover?.(); refreshMini(); }
+    });
+  }
+
+  /* Android: a foreground media service with a playback notification keeps
+     the session alive while Sovereign is in the background or the screen is
+     off, and lets lock-screen, notification and headset buttons control it. */
+  function nativeAudioSync(st, paused, p) {
+    const A = plugin("SovereignAudio");
+    if (!A) return;
+    const key = st && p ? `play:${p.id}` : paused && p ? `pause:${p.id}` : "off";
+    if (key === naState) return;
+    naState = key;
+    if (key === "off") { A.stop().catch(() => {}); return; }
+    A.start({ title: p.name, text: st ? `${p.band} · ${p.beat} Hz · Sovereign` : "Paused · Sovereign", playing: !!st }).catch((e) => console.warn("Background audio unavailable", e));
+  }
+
   function closeSoundPlayer() {
     clearInterval(SND.poll);
     closeOverlay($("#sound-player"));
     if (currentView === "protocols" && PTAB === "sound") refreshNowPlaying();
+    refreshMini();
   }
 
   function bindSound() {
@@ -2537,6 +2656,7 @@
       if (e.target.id === "set-import-file" && e.target.files[0]) importData(e.target.files[0]);
       if (e.target.id === "set-dc-dob") setDob(e.target.value);
       if (e.target.id === "set-dc-wake" && e.target.value) { state.daycycle.wake = e.target.value; save(); toast(`Wake time ${fmtClock(e.target.value)}`); }
+      if (e.target.id === "set-dc-sleep" && e.target.value) { state.daycycle.sleep = e.target.value; save(); toast(`Bedtime ${fmtClock(e.target.value)}`); }
     });
   }
 
@@ -2812,9 +2932,10 @@
     }
     if (IS_FULL) document.body.classList.add("full-view");
     if (christian()) G.tab = "scripture";
-    bindHome(); bindBanners(); bindGuide(); bindFocus(); bindDaycycle(); bindPacer(); bindSound(); bindCueSliders(); bindTimer(); bindLibrary(); bindJournal(); bindSettings();
+    bindHome(); bindBanners(); bindGuide(); bindFocus(); bindDaycycle(); bindPacer(); bindMini(); bindSound(); bindCueSliders(); bindTimer(); bindLibrary(); bindJournal(); bindSettings();
     $$(".nav-btn").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
     go("home");
+    refreshMini();
     checkMilestones();
     checkReminder();
     setInterval(checkReminder, 30000);

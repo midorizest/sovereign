@@ -44,8 +44,14 @@ jobs:
           RES=android/app/src/main/res
           rm -f $RES/drawable*/splash.png
           cp -R res/. $RES/
-          # Exact timing for gentle reminders on Android 12+ (falls back to inexact if denied)
-          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
+          # Native background audio: foreground media service, media notification,
+          # and the plugin that connects them to the app (replaces MainActivity).
+          JAVA=android/app/src/main/java/com/themidoriway/sovereign
+          ls $JAVA
+          cp native/*.java $JAVA/
+          # Permissions (exact reminder timing, background audio) and the service entry
+          python3 native/patch_manifest.py android/app/src/main/AndroidManifest.xml
+          grep -n "permission\|service" android/app/src/main/AndroidManifest.xml
           npx cap sync android
 
       - name: Set version

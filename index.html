@@ -118,6 +118,7 @@
         <div class="dc-fields">
           <label class="field"><span class="field-label">Birth date</span><input type="date" id="ob-dob"></label>
           <label class="field"><span class="field-label">Usual wake time</span><input type="time" id="ob-wake" value="07:00"></label>
+          <label class="field"><span class="field-label">Usual bedtime</span><input type="time" id="ob-sleep" value="22:30"></label>
         </div>
         <p class="hint">Optional. Your birth date stays on this device. Biorhythms aren't scientifically proven, so an evening check-in shows how well they match you. You can change this any time in Settings.</p>
         <button class="btn btn-primary" id="ob-dc-on" disabled>Turn on Daycycle</button>
@@ -280,6 +281,22 @@
         <div id="entries-list"></div>
       </section>
     </main>
+
+    <!-- Mini player: a sound session's controls on every screen -->
+    <div id="mini-player" class="mini-player" hidden role="region" aria-label="Now playing">
+      <span class="mp-progress" aria-hidden="true"><i id="mp-bar"></i></span>
+      <button class="mp-info" id="mp-open">
+        <span class="mp-glyph" id="mp-glyph" aria-hidden="true">θ</span>
+        <span class="mp-text"><span class="mp-name" id="mp-name">Sound</span><span class="mp-sub" id="mp-sub"></span></span>
+      </button>
+      <button class="mp-btn" id="mp-toggle" aria-label="Pause">
+        <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="3.6" height="14" rx="1.2" fill="currentColor"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.2" fill="currentColor"/></svg>
+        <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" fill="currentColor"/></svg>
+      </button>
+      <button class="mp-btn mp-stop" id="mp-stop" aria-label="Stop and log the session">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor"/></svg>
+      </button>
+    </div>
 
     <!-- Bottom navigation -->
     <nav class="bottom-nav" aria-label="Primary">
