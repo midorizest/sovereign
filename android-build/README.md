@@ -6,6 +6,7 @@ https://github.com/midorizest/sovereign/releases/tag/beta
 
 - `prepare-web.mjs` copies the web app into `www/` and allows Capacitor's inline bridge in the CSP.
 - `res/` holds the launcher icons, splash, notification icon and the Om notification sound.
-- `debug.keystore` is the standard public Android debug key (password `android`). It lets each new
-  beta install over the previous one. **It is not secret.** Before sharing the app widely or using
-  the Play Store, sign with a private release key instead.
+- APKs are signed with Sovereign's private release key, supplied by two GitHub Actions secrets:
+  `KEYSTORE_BASE64` (the .p12 keystore, base64) and `KEYSTORE_PASSWORD`. The key alias is `sovereign`.
+  `native/sign_gradle.py` wires it into the generated Gradle build. Nothing secret lives in this repo.
+  Keep a safe copy of the keystore: every future update must be signed with the same key.
