@@ -896,3 +896,15 @@ dialog { border-color: var(--hairline); box-shadow: var(--shadow-lift), var(--be
 body.has-mini .app { padding-bottom: calc(var(--nav-h) + 44px + 72px + env(safe-area-inset-bottom)); }
 body.has-mini .toast { bottom: calc(var(--nav-h) + 30px + 72px + env(safe-area-inset-bottom)); }
 @media (prefers-reduced-motion: reduce) { .mini-player:not(.paused) .mp-glyph { animation: none; } .mp-progress i { transition: none; } }
+
+/* v1.14 — Printables (Sovereign Library) */
+.printable-row { display: grid; gap: 12px; }
+.printable-card { display: grid; grid-template-columns: 84px 1fr; gap: 16px; align-items: center; width: 100%; text-align: left; padding: 14px; cursor: pointer;
+  border-color: var(--gold-line); background: linear-gradient(160deg, var(--gold-soft), var(--card) 60%); color: var(--text); font: inherit; }
+.printable-card img { width: 84px; aspect-ratio: 17 / 22; object-fit: cover; border-radius: 6px; box-shadow: 0 6px 16px -6px rgba(0,0,0,.6); }
+.printable-title { display: block; font-family: var(--serif); font-size: 1.3rem; line-height: 1.15; margin-bottom: 4px; }
+.printable-card .small { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+#printables-shelf .link-btn { margin-top: 6px; }
+#printables-shelf + #lesson-list { margin-top: 22px; }
+.printables { position: fixed; inset: 0; z-index: 45; background: #0c0b0a; animation: fade .25s both; }
+.printables iframe { display: block; width: 100%; height: 100%; border: 0; }

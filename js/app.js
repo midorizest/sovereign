@@ -24,7 +24,7 @@
 (() => {
   "use strict";
   const C = window.SOV; // content from content.js
-  const APP_VERSION = "1.13.0";
+  const APP_VERSION = "1.14.0";
   const STORAGE_KEY = "sovereign.v1";
 
   /* Platform: the same code runs as a website/PWA and as a Chrome extension.
@@ -196,6 +196,7 @@
     try { if (!$("#pacer").hidden) closePacer(); } catch (_) {}
     try { if (!$("#sound-player").hidden) closeSoundPlayer(); } catch (_) {}
     try { if (!$("#settings").hidden) closeOverlay($("#settings")); } catch (_) {}
+    try { if (!$("#printables").hidden) { closeOverlay($("#printables")); $("#printables-frame").removeAttribute("src"); delete $("#printables-frame").dataset.src; } } catch (_) {}
     KEY = null; PLAIN.clear(); draftPlain = ""; DOB_PLAIN = "";
     clearGrace();
     $("#app").inert = true; $("#app").hidden = true;
@@ -403,6 +404,7 @@
       if (!$("#sound-player").hidden) { $("#sp-close").click(); return; }
       if (!$("#settings").hidden) { closeSettings(); return; }
       if (!$("#daycycle").hidden) { closeDaycycle(); return; }
+      if (!$("#printables").hidden) { printablesBack(); return; }
       if (!$("#lesson-reader").hidden && currentView === "library") { renderLibrary(); return; }
       if (appStarted && currentView !== "home" && !$("#app").hidden) { go("home"); return; }
       App.exitApp();
@@ -1176,6 +1178,7 @@
   function renderLibrary() {
     $("#lesson-reader").hidden = true;
     $("#lesson-list").hidden = false;
+    renderPrintablesShelf();
     const lessons = C.LESSONS.filter((l) => !hiddenFor("lessons", l.id));
     const ready = lessons.filter((l) => l.file);
     const later = lessons.filter((l) => !l.file);
@@ -1227,7 +1230,91 @@
     window.scrollTo({ top: 0 });
     $("#lesson-h").focus();
   }
+  /* ---- Printables (library/): fillable PDFs saved on the device ---- */
+  let PRINTABLES = null;
+  async function renderPrintablesShelf() {
+    const el = $("#printables-shelf");
+    $("#printables-shelf").hidden = false;
+    try { PRINTABLES = PRINTABLES || (await import("../library/catalog.js")).CATALOG; } catch (e) { console.warn(e); el.innerHTML = ""; return; }
+    const track = state.profile.track;
+    const items = [...PRINTABLES].sort((a, b) => (b.track === track) - (a.track === track));
+    const mine = items.filter((i) => i.track === track || i.track === "all");
+    el.innerHTML = `<div class="cat-head" style="margin-top:6px"><h2>Printables</h2><p>Fill them in right here. Everything saves on this device.</p></div>
+      <div class="printable-row">${(mine.length ? mine : items).map((i) => `<button class="card printable-card" data-printable="${esc(i.id)}">
+        <img src="library/${esc(i.cover)}" alt="" loading="lazy">
+        <span><span class="eyebrow" style="display:block;margin:0 0 4px">${esc(i.edition)}</span>
+        <span class="printable-title">${esc(i.title)}</span>
+        <span class="muted small">${esc(i.blurb)}</span></span></button>`).join("")}</div>
+      ${mine.length && mine.length < items.length ? `<button class="link-btn" data-printable="">See all printables</button>` : ""}`;
+  }
+  async function openPrintables(id) {
+    const f = $("#printables-frame"), src = `library/index.html?track=${state.profile.track}`;
+    openOverlay($("#printables"), closePrintables);
+    if (f.dataset.src !== src) {
+      f.dataset.src = src;
+      await new Promise((res) => { f.addEventListener("load", res, { once: true }); f.src = src; });
+    }
+    // The Library sets up its API once its shelf has loaded.
+    for (let i = 0; i < 60 && !f.contentWindow?.SovereignLibrary; i++) await new Promise((r) => setTimeout(r, 50));
+    if (id && f.contentWindow?.SovereignLibrary) f.contentWindow.SovereignLibrary.open(id);
+    setTimeout(() => f.focus(), 200);
+  }
+  async function closePrintables() {
+    const lib = $("#printables-frame").contentWindow?.SovereignLibrary;
+    // Close any open book first so its entries are saved.
+    try { if (lib && !$("#printables-frame").contentDocument.querySelector("#reader").hidden) await lib.close(); } catch (_) {}
+    closeOverlay($("#printables"));
+    if (currentView === "library") renderPrintablesShelf();
+  }
+  /** Back button: close an open book, then the Library itself. */
+  function printablesBack() {
+    try {
+      const doc = $("#printables-frame").contentDocument;
+      if (doc && !doc.querySelector("#reader").hidden) { $("#printables-frame").contentWindow.SovereignLibrary.close(); return; }
+    } catch (_) {}
+    closePrintables();
+  }
+  // The Library page calls these from inside its frame.
+  window.SovereignBridge = {
+    close: () => closePrintables(),
+    ...(NATIVE ? { savePdf: async (name, base64) => {
+      const FS = plugin("Filesystem"), Share = plugin("Share");
+      const safe = name.replace(/[^\w .()-]+/g, "");
+      const r = await FS.writeFile({ path: safe, data: base64, directory: "CACHE" });
+      await Share.share({ title: safe, url: r.uri }).catch(() => {});
+    } } : {})
+  };
+
+  /* Printable entries live in the Library's own IndexedDB ("sovereign-library").
+     Backups carry them, and Reset erases them. */
+  function libDb() {
+    return new Promise((res) => {
+      try { const q = indexedDB.open("sovereign-library", 1); q.onupgradeneeded = () => q.result.createObjectStore("entries"); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }
+      catch (_) { res(null); }
+    });
+  }
+  async function readLibraryEntries() {
+    const db = await libDb(); if (!db) return {};
+    return new Promise((res) => {
+      const out = {}, st = db.transaction("entries").objectStore("entries"), cur = st.openCursor();
+      cur.onsuccess = () => { const c = cur.result; if (c) { out[c.key] = c.value; c.continue(); } else { db.close(); res(out); } };
+      cur.onerror = () => { db.close(); res(out); };
+    });
+  }
+  async function writeLibraryEntries(entries) {
+    const db = await libDb(); if (!db || !entries) return;
+    await new Promise((res) => {
+      const tx = db.transaction("entries", "readwrite"), st = tx.objectStore("entries");
+      st.clear(); Object.entries(entries).forEach(([k, v]) => st.put(v, k));
+      tx.oncomplete = tx.onerror = () => { db.close(); res(); };
+    });
+  }
+
   function bindLibrary() {
+    $("#printables-shelf").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-printable]");
+      if (b) openPrintables(b.dataset.printable);
+    });
     $("#lesson-list").addEventListener("click", (e) => {
       const b = e.target.closest("[data-lesson]");
       if (b) openLesson(b.dataset.lesson);
@@ -2723,10 +2810,11 @@
   }
 
   async function exportData() {
-    let payload = { app: "sovereign", version: APP_VERSION, exportedAt: new Date().toISOString(), data: state };
+    const full = { ...state, library: await readLibraryEntries().catch(() => ({})) };
+    let payload = { app: "sovereign", version: APP_VERSION, exportedAt: new Date().toISOString(), data: full };
     // With App lock on, the whole backup is encrypted with the passcode.
     if (secOn() && KEY) {
-      const box = await SovSecure.encryptJSON(KEY, state);
+      const box = await SovSecure.encryptJSON(KEY, full);
       payload = { app: "sovereign", version: APP_VERSION, exportedAt: payload.exportedAt, encrypted: true,
         salt: state.security.salt, iter: state.security.iter, check: state.security.check, ...box };
     }
@@ -2777,7 +2865,9 @@
         actions: [{ label: "Cancel", value: "no" }, { label: "Import", value: "yes", primary: true }]
       });
       if (v !== "yes") return;
+      const libEntries = data.library; delete data.library;
       state = normalise(data);
+      if (libEntries) await writeLibraryEntries(libEntries).catch(() => {});
       PLAIN.clear(); draftPlain = ""; DOB_PLAIN = "";
       KEY = secOn() ? importKey : null;
       if (KEY) { await decryptJournal(); await setGrace(); }
@@ -2803,6 +2893,7 @@
     if (v.value === "yes" && v.read.trim().toUpperCase() === "RESET") {
       try { localStorage.removeItem(STORAGE_KEY); } catch {}
       if (EXT) await chrome.storage.local.remove([STORAGE_KEY, "sovereign.writer"]).catch(() => {});
+      try { indexedDB.deleteDatabase("sovereign-library"); localStorage.removeItem("sovereign.track"); } catch (_) {}
       await clearGrace();
       location.reload();
     } else if (v.value === "yes") toast("Not reset — confirmation didn't match.");

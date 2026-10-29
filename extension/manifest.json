@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Sovereign — Energy Cultivation",
   "short_name": "Sovereign",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "description": "A private practice tracker and guide for energy cultivation: breathwork, mantra, binaural beats, journaling and streaks.",
   "minimum_chrome_version": "116",
   "icons": {

@@ -52,6 +52,9 @@ def main():
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
 
+    # Printables: the whole Sovereign Library folder
+    shutil.copytree(ROOT / "library", OUT / "library", ignore=shutil.ignore_patterns("README.md", "precache.txt"))
+
     # index.html: drop the PWA manifest link (not part of the extension)
     html = (OUT / "index.html").read_text()
     html = re.sub(r'\s*<link rel="manifest"[^>]*>', "", html)

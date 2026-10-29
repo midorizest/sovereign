@@ -231,6 +231,7 @@
       <section class="view" id="view-library" hidden aria-labelledby="lib-h">
         <h1 class="view-title" id="lib-h">Library</h1>
         <p class="view-sub">Short teachings. Read slowly. Return often.</p>
+        <div id="printables-shelf"></div>
         <div id="lesson-list"></div>
         <article id="lesson-reader" class="lesson" hidden></article>
       </section>
@@ -457,6 +458,11 @@
       </div>
       <div id="daycycle-body"></div>
     </div>
+  </section>
+
+  <!-- Printables: the Sovereign Library, shown inside the app so sound keeps playing -->
+  <section id="printables" class="printables" hidden role="dialog" aria-modal="true" aria-label="Sovereign Library printables">
+    <iframe id="printables-frame" title="Sovereign Library"></iframe>
   </section>
 
   <dialog id="dialog" aria-labelledby="dialog-title">
