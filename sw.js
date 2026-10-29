@@ -5,7 +5,7 @@
    falling back to index.html for navigations when offline.
    To ship an update: change CACHE_VERSION — old caches are cleaned up.
    ========================================================================== */
-const CACHE_VERSION = "sovereign-v1.15.0";
+const CACHE_VERSION = "sovereign-v1.16.0";
 
 const APP_SHELL = [
   "./",

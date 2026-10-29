@@ -24,7 +24,7 @@
 (() => {
   "use strict";
   const C = window.SOV; // content from content.js
-  const APP_VERSION = "1.15.0";
+  const APP_VERSION = "1.16.0";
   const STORAGE_KEY = "sovereign.v1";
 
   /* Platform: the same code runs as a website/PWA and as a Chrome extension.
@@ -44,6 +44,7 @@
     try { return CAP.registerPlugin ? CAP.registerPlugin(name) : null; } catch (_) { return null; }
   };
   const WRITER_ID = Math.random().toString(36).slice(2); // identifies this window's saves
+  let saveSeq = 0;
   let appStarted = false;
 
   /* ========================================================================
@@ -160,6 +161,7 @@
     DOB_PLAIN = dob || "";
     state.daycycle.dobEnc = dob ? await SovSecure.encryptText(key, dob) : null;
     state.daycycle.dob = "";
+    await relockLibrary(KEY, key);
   }
   function decryptedJournalPlain() {
     return state.journal.map((j) => j.enc ? { id: j.id, date: j.date, ts: j.ts, ...(PLAIN.get(j.id) || { prompt: "", text: "" }) } : j);
@@ -196,7 +198,9 @@
     try { if (!$("#pacer").hidden) closePacer(); } catch (_) {}
     try { if (!$("#sound-player").hidden) closeSoundPlayer(); } catch (_) {}
     try { if (!$("#settings").hidden) closeOverlay($("#settings")); } catch (_) {}
-    try { if (!$("#journey").hidden) { closeOverlay($("#journey")); } TRK.entry = null; } catch (_) {}
+    try { if (TRK.entry) trFlush(); } catch (_) {}
+    try { if (!$("#journey").hidden) closeOverlay($("#journey")); TRK.entry = null; } catch (_) {}
+    try { if (!$("#daycycle").hidden) closeOverlay($("#daycycle")); } catch (_) {}
     try { if (!$("#printables").hidden) { closeOverlay($("#printables")); $("#printables-frame").removeAttribute("src"); delete $("#printables-frame").dataset.src; } } catch (_) {}
     KEY = null; PLAIN.clear(); draftPlain = ""; DOB_PLAIN = "";
     clearGrace();
@@ -255,7 +259,7 @@
     const v = await dialog({
       title: "Forgot your passcode?",
       html: `<p>Your passcode can't be recovered — it's never stored anywhere, which is what keeps your journal private.</p>
-             <p>You can remove the lock. <strong>Your encrypted journal entries will be permanently erased</strong>, along with your Daycycle birth date. Your practice history, streaks and settings stay.</p>
+             <p>You can remove the lock. <strong>Your encrypted journal entries will be permanently erased</strong>, along with your Daycycle birth date and your 40-Day Tracker entries. Your practice history, streaks and settings stay.</p>
              <p class="muted">If you have an encrypted backup, you'll still need the passcode you used when you made it.</p>
              <label class="field"><span class="field-label">Type ERASE to confirm</span><input type="text" id="forgot-confirm" autocomplete="off"></label>`,
       actions: [{ label: "Cancel", value: "no" }, { label: "Erase journal & remove lock", value: "yes", danger: true }],
@@ -265,6 +269,7 @@
     state.journal = state.journal.filter((j) => !j.enc);
     state.draftEnc = null; state.draft = "";
     state.daycycle.dobEnc = null; state.daycycle.briefs = {};
+    try { const all = await readLibraryEntries(); for (const [id, raw] of Object.entries(all)) if (raw && raw.enc) await libDel(id); } catch (_) {}
     state.security = null;
     save(); await clearGrace();
     toast("Lock removed. Your journal was erased.");
@@ -321,7 +326,7 @@
   function save() {
     if (EXT) {
       // The writer id lets other open windows (panel ↔ full view) know the change came from elsewhere.
-      chrome.storage.local.set({ [STORAGE_KEY]: state, "sovereign.writer": WRITER_ID })
+      chrome.storage.local.set({ [STORAGE_KEY]: state, "sovereign.writer": `${WRITER_ID}:${++saveSeq}` })
         .catch(() => toast("Could not save — storage may be full. Please export a backup."));
       return;
     }
@@ -353,11 +358,12 @@
   }
   async function scheduleNative() {
     const LN = plugin("LocalNotifications");
-    if (!LN || !state.profile) return;
+    if (!LN) return;
     try {
       const pending = await LN.getPending();
       const mine = (pending.notifications || []).filter((n) => n.id >= 100 && n.id <= 200).map((n) => ({ id: n.id }));
       if (mine.length) await LN.cancel({ notifications: mine });
+      if (!state.profile) return;
       if (state.settings.reminders === false) return;
       await ensureChannels();
       const channelId = { silent: "sovereign-quiet", bell: "sovereign-bell" }[reminderSound()] || "sovereign-om";
@@ -428,7 +434,7 @@
     if (!EXT) return;
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local" || !changes[STORAGE_KEY]) return;
-      if (changes["sovereign.writer"]?.newValue === WRITER_ID) return; // our own save
+      if (String(changes["sovereign.writer"]?.newValue || "").startsWith(WRITER_ID + ":")) return; // our own save
       const next = changes[STORAGE_KEY].newValue;
       if (!next || !next.profile) { location.reload(); return; }   // reset elsewhere
       if (!appStarted) { location.reload(); return; }               // onboarding finished elsewhere
@@ -695,7 +701,7 @@
 
     if (p.kind === "minutes") {
       body = `<label class="minutes"><span class="visually-hidden">${p.name} minutes</span>
-        <input type="number" inputmode="numeric" min="0" max="600" step="1" data-min="${p.id}" value="${data.min || ""}" placeholder="0">
+        <input type="number" inputmode="numeric" min="0" max="600" step="1" data-min="${p.id}" value="${esc(data.min || "")}" placeholder="0">
         <span class="muted small">minutes</span></label>`;
     }
     if (p.kind === "retention") {
@@ -705,7 +711,7 @@
           <button class="chip" data-ret="released" aria-pressed="${data.status === "released"}">Released</button>
         </div>
         <label class="minutes"><span class="muted small">Day</span>
-          <input type="number" min="0" max="9999" data-retcount value="${data.status === "released" ? 0 : suggested}" aria-label="Retention day count">
+          <input type="number" min="0" max="9999" data-retcount value="${esc(data.status === "released" ? 0 : suggested)}" aria-label="Retention day count">
         </label>
         ${data.status === "released" ? '<p class="muted small" style="flex-basis:100%;margin:4px 0 0">Noted without judgement. Every day is a new beginning.</p>' : ""}`;
     }
@@ -747,7 +753,7 @@
     $("#tracker-card").addEventListener("click", (e) => {
       const b = e.target.closest("[data-trc]"); if (!b) return;
       if (b.dataset.trc === "today") openTracker("today");
-      else if (b.dataset.trc === "final") openTracker().then(() => trGo("review", { review: "final" }));
+      else if (b.dataset.trc === "final") openTracker().then(() => { if (state.tracker?.ack) trGo("review", { review: "final" }); });
       else { TRK.view = "overview"; openTracker(); }
     });
     $("#daily-principle").addEventListener("click", (e) => {
@@ -1292,6 +1298,9 @@
   // The Library page calls these from inside its frame.
   window.SovereignBridge = {
     close: () => closePrintables(),
+    loadEntry: (id) => libGet(id),
+    saveEntry: (id, entry) => libPut(id, entry),
+    deleteEntry: (id) => libDel(id),
     ...(NATIVE ? { savePdf: async (name, base64) => {
       const FS = plugin("Filesystem"), Share = plugin("Share");
       const safe = name.replace(/[^\w .()-]+/g, "");
@@ -1302,6 +1311,33 @@
 
   /* Printable entries live in the Library's own IndexedDB ("sovereign-library").
      Backups carry them, and Reset erases them. */
+  /* Tracker and printable entries go through the app, which encrypts them with
+     the App-lock key while the lock is on (just like the journal). */
+  async function libGet(id) {
+    const raw = await readLibEntry(id);
+    if (!raw || !raw.enc) return raw;
+    if (!KEY) return null;
+    try { return await SovSecure.decryptJSON(KEY, raw.enc); } catch (_) { return null; }
+  }
+  function libPut(id, entry) {
+    const key = secOn() ? KEY : null;   // captured now, so a save begun just before locking still completes
+    if (secOn() && !key) return Promise.resolve();   // locked: never write plain text
+    return key ? SovSecure.encryptJSON(key, entry).then((enc) => writeLibEntry(id, { enc })) : writeLibEntry(id, entry);
+  }
+  async function libDel(id) {
+    const db = await libDb(); if (!db) return;
+    await new Promise((res) => { const tx = db.transaction("entries", "readwrite"); tx.objectStore("entries").delete(id); tx.oncomplete = tx.onerror = () => { db.close(); res(); }; });
+  }
+  /** Re-encrypt every Library entry: oldKey → newKey (null means plain text). */
+  async function relockLibrary(oldKey, newKey) {
+    const all = await readLibraryEntries().catch(() => ({}));
+    for (const [id, raw] of Object.entries(all)) {
+      let plain = raw;
+      if (raw && raw.enc) { if (!oldKey) continue; try { plain = await SovSecure.decryptJSON(oldKey, raw.enc); } catch (_) { continue; } }
+      await writeLibEntry(id, newKey ? { enc: await SovSecure.encryptJSON(newKey, plain) } : plain);
+    }
+  }
+
   function libDb() {
     return new Promise((res) => {
       try { const q = indexedDB.open("sovereign-library", 1); q.onupgradeneeded = () => q.result.createObjectStore("entries"); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }
@@ -1679,7 +1715,7 @@
         <button class="btn" data-focus="remind-save">Set</button>
         <button class="link-btn" data-focus="remind-cancel">Cancel</button></div>`;
     }
-    if (f.remindAt) return `<p class="focus-remind"><span class="bell" aria-hidden="true">◦</span> A gentle reminder at <strong>${fmtClock(f.remindAt)}</strong>${f.notified ? " (sent)" : ""} ·
+    if (f.remindAt) return `<p class="focus-remind"><span class="bell" aria-hidden="true">◦</span> A gentle reminder at <strong>${esc(fmtClock(f.remindAt))}</strong>${f.notified ? " (sent)" : ""} ·
       <button class="link-btn" data-focus="remind-edit">Change</button> · <button class="link-btn" data-focus="remind-clear">Remove</button></p>`;
     return `<p class="focus-remind"><button class="link-btn" data-focus="remind-edit">Remind me later today</button></p>`;
   }
@@ -1920,7 +1956,7 @@
   /** Lines for the daily reminder, kept only while notifications show details. */
   function refreshBriefs() {
     const out = {};
-    if (dcReady() && state.settings.discreet === false) {
+    if (dcReady() && state.settings.discreet === false && !secOn()) {
       for (let i = 0; i < 8; i++) {
         const k = dateKey(addDays(new Date(), i)), t = dcT(k);
         const act = dcAction(DC().keyBlock(t, DC().plan(t, { phase: i === 0 ? dcPhase() : null })).act);
@@ -2036,7 +2072,7 @@
     clearTimeout(TRK.timer);
     if (!TRK.entry) return;
     TRK.entry.updatedAt = new Date().toISOString();
-    await writeLibEntry(trId(), TRK.entry);
+    await libPut(trId(), TRK.entry);
     const s = $("#tr-status"); if (s) s.textContent = "Saved on this device";
   }
 
@@ -2082,8 +2118,9 @@
 
   async function openTracker(target) {
     if (!TR()) return;
-    TRK.entry = (await readLibEntry(trId())) || { values: {}, page: 1 };
-    if (!trStart()) TRK.view = "start";
+    TRK.entry = (await libGet(trId())) || { values: {}, page: 1 };
+    if (!state.tracker?.ack) TRK.view = "intro";
+    else if (!trStart()) TRK.view = "start";
     else if (target === "today") { TRK.view = "day"; TRK.day = trTodayN(); }
     else if (!TRK.view || TRK.view === "start") TRK.view = "overview";
     $("#journey-title").textContent = "40-Day Tracker";
@@ -2104,7 +2141,8 @@
   }
   function renderTracker() {
     const b = $("#journey-body");
-    if (TRK.view === "start") b.innerHTML = trStartHTML();
+    if (TRK.view === "intro") b.innerHTML = trIntroHTML();
+    else if (TRK.view === "start") b.innerHTML = trStartHTML();
     else if (TRK.view === "day") { trPullFromHome(TRK.day); b.innerHTML = trDayHTML(TRK.day); }
     else if (TRK.view === "review") b.innerHTML = trReviewHTML(TRK.review);
     else b.innerHTML = trOverviewHTML();
@@ -2118,13 +2156,50 @@
     <textarea data-tr-text="${name}" rows="${rows}" placeholder="${esc(hint)}">${esc(tGet(name) || "")}</textarea></label>`;
   const trFoot = () => `<p class="tr-status muted small" id="tr-status" aria-live="polite">Saved on this device</p>`;
 
+  const TR_SIGIL = `<svg class="tr-sigil" viewBox="0 0 200 200" aria-hidden="true">
+    <circle cx="100" cy="100" r="96" fill="none" stroke="currentColor" stroke-width="2.2" stroke-dasharray="0.1 5.4" stroke-linecap="round"/>
+    <circle cx="100" cy="100" r="86" fill="none" stroke="currentColor" stroke-width="1"/>
+    <circle cx="100" cy="100" r="82" fill="none" stroke="currentColor" stroke-width=".6" opacity=".7"/>
+    <circle cx="100" cy="100" r="60" fill="none" stroke="currentColor" stroke-width=".9"/>
+    ${[0, 1, 2, 3, 4, 5, 6].map((i) => { const a = (i / 7) * Math.PI * 2 - Math.PI / 2 + 0.45; return `<circle cx="${(100 + 60 * Math.cos(a)).toFixed(1)}" cy="${(100 + 60 * Math.sin(a)).toFixed(1)}" r="2.2" fill="currentColor"/>`; }).join("")}
+    <path d="M58 100 Q100 66 142 100 Q100 134 58 100 Z" fill="none" stroke="currentColor" stroke-width="1.2"/>
+    <circle cx="100" cy="100" r="11" fill="none" stroke="currentColor" stroke-width="1"/>
+    <circle cx="100" cy="100" r="6" fill="currentColor"/></svg>`;
+
+  /** The tracker's opening pages: cover and "How to use this tracker". Must be acknowledged once. */
+  function trIntroHTML() {
+    const T = TR(), ed = trEd();
+    const [before, choice] = T.before[ed].split(/ (?=(?:Retention|Cycle awareness) is a personal choice)/);
+    return `<div class="tr-cover">
+        <p class="tr-edition">${ed === "men" ? "Men’s" : "Women’s"} Edition</p>
+        ${TR_SIGIL}
+        <p class="tr-wordmark">SOVEREIGN</p>
+        <span class="tr-rule" aria-hidden="true"></span>
+        <p class="tr-subtitle">${esc(T.title)}</p>
+        <p class="tr-cover-tag">${esc(T.tagline)}</p>
+        <p class="tr-series">Pupil Club · Sovereign Series</p>
+      </div>
+      <p class="eyebrow" style="margin-top:28px">Begin here</p>
+      <h3 class="tr-h" tabindex="-1">How to use this tracker</h3>
+      ${T.intro[ed].map((p) => `<p>${esc(p)}</p>`).join("")}
+      <p><strong>Before you begin.</strong> ${esc(before.replace(/^This/, "this").replace(/^this/, "This"))}</p>
+      ${choice ? `<p>${esc(choice)}</p>` : ""}
+      <div class="tr-yourway">
+        <p class="tr-label">Use it your way</p>
+        <p><strong>In the app</strong><br>One day per page. Tap a dot to rate, tick what you practised, and write as much or as little as you like. Everything saves on this device as you go.</p>
+        <p><strong>On paper or a tablet</strong><br>Open “View as printable” from the tracker to see the original pages, with your entries already filled in. Save a copy to print or use in GoodNotes, Notability, Xodo or Adobe.</p>
+        <p><strong>Getting around</strong><br>“All 40 days” shows every day and each weekly review. Home shows today’s prompt once you begin.</p>
+      </div>
+      <label class="check-row tr-ack"><input type="checkbox" id="tr-ack"${state.tracker?.ack ? " checked" : ""}>
+        <span>I understand. This is a reflective practice, not medical or psychological advice, and I will stop any practice that makes me feel unwell.</span></label>
+      <button class="btn btn-primary btn-block btn-cta" data-tr-ack ${state.tracker?.ack ? "" : "disabled"}>Continue</button>`;
+  }
+
   function trStartHTML() {
     const T = TR(), ed = trEd();
     return `<p class="eyebrow">${ed === "men" ? "Men’s" : "Women’s"} Edition · Sovereign Series</p>
       <h3 class="tr-h">${esc(T.title)}</h3>
       <p class="tr-tagline">${esc(T.tagline)}</p>
-      ${T.intro[ed].map((p) => `<p>${esc(p)}</p>`).join("")}
-      <details class="tr-before"><summary>Before you begin</summary><p class="muted">${esc(T.before[ed])}</p></details>
       <div class="card tr-commit">
         <p class="eyebrow">My commitment</p>
         <p class="tr-commit-line">${esc(T.commitment)}</p>
@@ -2156,6 +2231,7 @@
       <div class="tr-grid">${rows}</div>
       <p class="hint tr-legend"><span class="tr-key has"></span> filled in <span class="tr-key now"></span> today <span class="tr-key rev">R</span> weekly review</p>
       <div class="btn-row tr-links">
+        <button class="btn" data-tr-intro>Introduction</button>
         <button class="btn" data-tr-commit>My commitment</button>
         <button class="btn" data-tr-printable>View as printable</button>
         <button class="link-btn tr-reset" data-tr-reset>Start over</button>
@@ -2225,6 +2301,12 @@
       if (b.dataset.trReview) return trGo("review", { review: b.dataset.trReview === "final" ? "final" : Number(b.dataset.trReview) });
       if (b.hasAttribute("data-tr-overview")) return trGo("overview");
       if (b.hasAttribute("data-tr-commit")) return trGo("start");
+      if (b.hasAttribute("data-tr-intro")) return trGo("intro");
+      if (b.hasAttribute("data-tr-ack")) {
+        if (!$("#tr-ack").checked) return;
+        state.tracker = { ...(state.tracker || {}), ack: state.tracker?.ack || new Date().toISOString() }; save();
+        return trGo(trStart() ? "overview" : "start");
+      }
       if (b.hasAttribute("data-tr-printable")) { await trFlush(); closeOverlay($("#journey")); return openPrintables(trId()); }
       if (b.hasAttribute("data-tr-hand")) { await trFlush(); closeOverlay($("#journey")); go("guide"); return ensureGuide().then(() => openGuideItem("hand-overview")); }
       if (b.hasAttribute("data-tr-begin")) {
@@ -2242,8 +2324,8 @@
         const v = await dialog({ title: "Start the forty days over?", html: "<p>This clears every entry in your tracker, in the app and in the printable. Your Home practice history stays.</p>",
           actions: [{ label: "Cancel", value: "no" }, { label: "Clear and start over", value: "yes", danger: true }] });
         if (v !== "yes") return;
-        TRK.entry = { values: {}, page: 1 }; await writeLibEntry(trId(), TRK.entry);
-        state.tracker = null; save();
+        TRK.entry = { values: {}, page: 1 }; await libPut(trId(), TRK.entry);
+        state.tracker = state.tracker?.ack ? { ack: state.tracker.ack } : null; save();
         toast("Cleared. Begin again whenever you're ready."); return trGo("start");
       }
       if (b.dataset.trRadio) {
@@ -2262,6 +2344,9 @@
         if (b.dataset.home) trPushToHome(trCurrentDayOf(b), b.dataset.home, on);
       }
     });
+    body.addEventListener("change", (e) => {
+      if (e.target.id === "tr-ack") body.querySelector("[data-tr-ack]").disabled = !e.target.checked;
+    });
     body.addEventListener("input", (e) => {
       const t = e.target.closest("[data-tr-text]"); if (!t) return;
       tSet(t.dataset.trText, t.value);
@@ -2273,7 +2358,11 @@
     });
   }
   /** Back button inside the tracker: page → overview → close. */
-  function trackerBack() { if (TRK.view === "day" || TRK.view === "review" || (TRK.view === "start" && trStart())) trGo("overview"); else closeTracker(); }
+  function trackerBack() {
+    if (state.tracker?.ack && trStart() && (TRK.view === "day" || TRK.view === "review" || TRK.view === "start" || TRK.view === "intro")) trGo("overview");
+    else if (TRK.view === "start" && state.tracker?.ack && !trStart()) trGo("intro");
+    else closeTracker();
+  }
 
   function renderTrackerCard() {
     const el = $("#tracker-card");
@@ -2868,10 +2957,10 @@
     $("#entries-title").textContent = title;
     $("#entries-list").innerHTML = entries.length
       ? entries.map((j) => entryView(j)).map((j) => `<article class="card entry">
-          <time datetime="${j.ts}">${new Date(j.ts).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
+          <time datetime="${esc(j.ts)}">${new Date(j.ts).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
           ${j.prompt ? `<p class="entry-prompt">${esc(j.prompt)}</p>` : ""}
           <p class="entry-text">${esc(j.text)}</p>
-          <div class="entry-actions"><button class="link-btn small" data-del="${j.id}">Delete</button></div>
+          <div class="entry-actions"><button class="link-btn small" data-del="${esc(j.id)}">Delete</button></div>
         </article>`).join("")
       : `<p class="empty">${cal.selected ? "No entry on this day." : "No entries this month yet."}</p>`;
   }
@@ -3107,6 +3196,7 @@
   async function disableLock() {
     if (!(await confirmCurrent("Turn off App lock"))) return;
     await decryptJournal();
+    await relockLibrary(KEY, null);
     state.journal = decryptedJournalPlain();
     state.draft = draftPlain; state.draftEnc = null;
     if (state.daycycle.dobEnc) { state.daycycle.dob = DOB_PLAIN; state.daycycle.dobEnc = null; }
@@ -3175,7 +3265,7 @@
       if (v !== "yes") return;
       const libEntries = data.library; delete data.library;
       state = normalise(data);
-      if (libEntries) await writeLibraryEntries(libEntries).catch(() => {});
+      await writeLibraryEntries(libEntries || {}).catch(() => {});
       PLAIN.clear(); draftPlain = ""; DOB_PLAIN = "";
       KEY = secOn() ? importKey : null;
       if (KEY) { await decryptJournal(); await setGrace(); }
@@ -3199,6 +3289,11 @@
       read: () => $("#reset-confirm").value
     });
     if (v.value === "yes" && v.read.trim().toUpperCase() === "RESET") {
+      if (NATIVE) {
+        try { const LN = plugin("LocalNotifications"); const pend = await LN.getPending(); const ids = (pend.notifications || []).map((n) => ({ id: n.id })); if (ids.length) await LN.cancel({ notifications: ids }); } catch (_) {}
+        try { await plugin("SovereignAudio")?.stop(); } catch (_) {}
+      }
+      try { await sndEngine.stop({ log: false, fade: false }); } catch (_) {}
       try { localStorage.removeItem(STORAGE_KEY); } catch {}
       if (EXT) await chrome.storage.local.remove([STORAGE_KEY, "sovereign.writer"]).catch(() => {});
       try { indexedDB.deleteDatabase("sovereign-library"); localStorage.removeItem("sovereign.track"); } catch (_) {}

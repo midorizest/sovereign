@@ -10,6 +10,8 @@ const STD_FONTS = new URL("./vendor/pdfjs/standard_fonts/", import.meta.url).hre
 const $ = (s) => document.querySelector(s);
 // Inside the Sovereign app the Library runs in a frame; the app provides the bridge.
 const bridge = () => window.SovereignBridge || (window.parent !== window ? window.parent.SovereignBridge : null) || null;
+// The Library only runs inside Sovereign, which handles App lock and encrypts entries.
+if (window.top === window && !window.SovereignBridge) { location.replace("../index.html"); await new Promise(() => {}); }
 
 /* ---------------- Storage (IndexedDB, with localStorage fallback) ---------------- */
 const DB_NAME = "sovereign-library", STORE = "entries";
@@ -27,6 +29,7 @@ function openDb() {
   return dbPromise;
 }
 async function loadEntry(id) {
+  if (bridge()?.loadEntry) return bridge().loadEntry(id);
   const db = await openDb();
   if (db) {
     return new Promise((res) => {
@@ -40,6 +43,7 @@ async function loadEntry(id) {
   try { return JSON.parse(localStorage.getItem(`${DB_NAME}:${id}`)) || null; } catch { return null; }
 }
 async function saveEntry(id, entry) {
+  if (bridge()?.saveEntry) return bridge().saveEntry(id, entry);
   const db = await openDb();
   if (db) {
     return new Promise((res, rej) => {
@@ -54,6 +58,7 @@ async function saveEntry(id, entry) {
   localStorage.setItem(`${DB_NAME}:${id}`, JSON.stringify(entry));
 }
 async function deleteEntry(id) {
+  if (bridge()?.deleteEntry) return bridge().deleteEntry(id);
   const db = await openDb();
   if (db) {
     return new Promise((res) => {

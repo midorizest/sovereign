@@ -972,3 +972,22 @@ body.has-mini .toast { bottom: calc(var(--nav-h) + 30px + 72px + env(safe-area-i
 .tr-card h2 { margin-bottom: 12px; }
 .tr-card-prompt { font: italic 500 1.12rem/1.45 var(--serif); margin: 14px 0 0; }
 .printable-card.built-in { cursor: default; }
+
+/* v1.16 — Tracker introduction (cover + Begin here) */
+.tr-cover { text-align: center; padding: 30px 20px 26px; border: 1px solid var(--gold-line); outline: 1px solid var(--gold-line); outline-offset: -7px;
+  border-radius: 6px; background: #0c0b0a; color: #ece7dc; }
+.tr-edition, .tr-series { font: 500 .62rem/1 var(--sans); letter-spacing: .32em; text-transform: uppercase; margin: 0; }
+.tr-edition { color: #c9a961; }
+.tr-series { color: #8d877c; margin-top: 26px; }
+.tr-sigil { display: block; width: min(52%, 190px); margin: 22px auto 18px; color: #c9a961; }
+.tr-wordmark { font: 300 clamp(1.9rem, 9vw, 2.6rem)/1 var(--serif); letter-spacing: .24em; margin: 0 0 0 .24em; }
+.tr-rule { display: block; width: 52px; height: 1px; background: #c9a961; margin: 16px auto 14px; }
+.tr-subtitle { font: italic 500 1.2rem/1.2 var(--serif); color: #c9a961; margin: 0; }
+.tr-cover-tag { font: italic 400 1rem/1.4 var(--serif); color: #d8d2c4; margin: 26px 0 0; }
+.tr-yourway { margin: 20px 0; padding: 16px 18px; border-radius: var(--radius-sm); background: var(--gold-soft); border: 1px solid var(--gold-line); }
+.tr-yourway p { font-size: .92rem; margin: 0 0 12px; color: var(--muted); }
+.tr-yourway p:last-child { margin-bottom: 0; }
+.tr-yourway strong { font: 500 1.08rem var(--serif); color: var(--text); }
+.tr-ack { margin: 22px 0 16px; align-items: flex-start; }
+.tr-ack span { font-size: .95rem; }
+.tr-yourway .tr-label { color: var(--gold); }
