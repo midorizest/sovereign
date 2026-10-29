@@ -24,7 +24,7 @@
 (() => {
   "use strict";
   const C = window.SOV; // content from content.js
-  const APP_VERSION = "1.14.0";
+  const APP_VERSION = "1.15.0";
   const STORAGE_KEY = "sovereign.v1";
 
   /* Platform: the same code runs as a website/PWA and as a Chrome extension.
@@ -196,6 +196,7 @@
     try { if (!$("#pacer").hidden) closePacer(); } catch (_) {}
     try { if (!$("#sound-player").hidden) closeSoundPlayer(); } catch (_) {}
     try { if (!$("#settings").hidden) closeOverlay($("#settings")); } catch (_) {}
+    try { if (!$("#journey").hidden) { closeOverlay($("#journey")); } TRK.entry = null; } catch (_) {}
     try { if (!$("#printables").hidden) { closeOverlay($("#printables")); $("#printables-frame").removeAttribute("src"); delete $("#printables-frame").dataset.src; } } catch (_) {}
     KEY = null; PLAIN.clear(); draftPlain = ""; DOB_PLAIN = "";
     clearGrace();
@@ -405,6 +406,7 @@
       if (!$("#settings").hidden) { closeSettings(); return; }
       if (!$("#daycycle").hidden) { closeDaycycle(); return; }
       if (!$("#printables").hidden) { printablesBack(); return; }
+      if (!$("#journey").hidden) { trackerBack(); return; }
       if (!$("#lesson-reader").hidden && currentView === "library") { renderLibrary(); return; }
       if (appStarted && currentView !== "home" && !$("#app").hidden) { go("home"); return; }
       App.exitApp();
@@ -667,6 +669,7 @@
 
     renderFocus();
     renderDaycycleCard();
+    renderTrackerCard();
     if (refreshBriefs()) save();
 
     // Principle of the day
@@ -741,6 +744,12 @@
 
   /* Event delegation for the checklist (one listener, survives re-renders). */
   function bindHome() {
+    $("#tracker-card").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-trc]"); if (!b) return;
+      if (b.dataset.trc === "today") openTracker("today");
+      else if (b.dataset.trc === "final") openTracker().then(() => trGo("review", { review: "final" }));
+      else { TRK.view = "overview"; openTracker(); }
+    });
     $("#daily-principle").addEventListener("click", (e) => {
       if (!e.target.closest("[data-scripture-help]")) return;
       G.tab = "scripture"; G.query = ""; $("#guide-search").value = "";
@@ -1240,7 +1249,13 @@
     const items = [...PRINTABLES].sort((a, b) => (b.track === track) - (a.track === track));
     const mine = items.filter((i) => i.track === track || i.track === "all");
     el.innerHTML = `<div class="cat-head" style="margin-top:6px"><h2>Printables</h2><p>Fill them in right here. Everything saves on this device.</p></div>
-      <div class="printable-row">${(mine.length ? mine : items).map((i) => `<button class="card printable-card" data-printable="${esc(i.id)}">
+      <div class="printable-row">${(mine.length ? mine : items).map((i) => i.id === trId() && TR() ? `<div class="card printable-card built-in">
+        <img src="library/${esc(i.cover)}" alt="">
+        <span><span class="eyebrow" style="display:block;margin:0 0 4px">${esc(i.edition)}</span>
+        <span class="printable-title">${esc(i.title)}</span>
+        <span class="muted small">${trStart() ? `Day ${trTodayN()} of 40 · began ${esc(trShortDate(trStart()))}` : "Built into the app: one day per page, easy to fill in."}</span>
+        <span class="btn-row" style="margin-top:12px"><button class="btn btn-primary" data-tracker-open>${trStart() ? "Continue" : "Begin"}</button>
+        <button class="link-btn" data-printable="${esc(i.id)}">View as printable</button></span></span></div>` : `<button class="card printable-card" data-printable="${esc(i.id)}">
         <img src="library/${esc(i.cover)}" alt="" loading="lazy">
         <span><span class="eyebrow" style="display:block;margin:0 0 4px">${esc(i.edition)}</span>
         <span class="printable-title">${esc(i.title)}</span>
@@ -1312,6 +1327,7 @@
 
   function bindLibrary() {
     $("#printables-shelf").addEventListener("click", (e) => {
+      if (e.target.closest("[data-tracker-open]")) { openTracker(trStart() ? "today" : undefined); return; }
       const b = e.target.closest("[data-printable]");
       if (b) openPrintables(b.dataset.printable);
     });
@@ -1981,6 +1997,298 @@
     $("#daycycle-body").addEventListener("click", handler);
     $("#close-daycycle").addEventListener("click", closeDaycycle);
     $("#daycycle").addEventListener("click", (e) => { if (e.target.id === "daycycle") closeDaycycle(); });
+  }
+
+  /* ========================================================================
+     9f. 40-DAY ENERGY TRACKER — built in
+     The printable's tracker in the app's own screens. Entries are stored in
+     the Library's database under the printable's field names, so the built-in
+     tracker and the PDF show the same entries, and backups carry them. Where
+     the tracker overlaps with Home (practice minutes, held/released, cycle
+     phase), the two stay in step.
+     ======================================================================== */
+  const TR = () => C.TRACKER;
+  const trEd = () => (state.profile.track === "women" ? "women" : "men");
+  const trId = () => `tracker-${trEd()}`;
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const TRK = { entry: null, view: "overview", day: 1, review: null, timer: null };
+  const TR_PRACTICES = [["grounding", "Grounding"], ["breath", "Breath"], ["meditation", "Meditation"]];
+  const RATE = ["1", "2", "3", "4", "5"];
+
+  async function readLibEntry(id) {
+    const db = await libDb(); if (!db) return null;
+    return new Promise((res) => {
+      try { const g = db.transaction("entries").objectStore("entries").get(id); g.onsuccess = () => { db.close(); res(g.result || null); }; g.onerror = () => { db.close(); res(null); }; }
+      catch (_) { db.close(); res(null); }
+    });
+  }
+  async function writeLibEntry(id, entry) {
+    const db = await libDb(); if (!db) return;
+    await new Promise((res) => { const tx = db.transaction("entries", "readwrite"); tx.objectStore("entries").put(entry, id); tx.oncomplete = tx.onerror = () => { db.close(); res(); }; });
+  }
+  const TV = () => (TRK.entry.values = TRK.entry.values || {});
+  const tGet = (name) => TV()[`${name}#0`]?.value;
+  const tRadio = (name, opts) => { const i = opts.findIndex((_, k) => TV()[`${name}#${k}`]?.value === true); return i < 0 ? null : opts[i]; };
+  function tSet(name, v) { TV()[`${name}#0`] = { value: v }; trQueue(); }
+  function tSetRadio(name, opts, val) { opts.forEach((o, k) => { TV()[`${name}#${k}`] = { value: o === val }; }); trQueue(); }
+  function trQueue() { clearTimeout(TRK.timer); TRK.timer = setTimeout(trFlush, 400); const s = $("#tr-status"); if (s) s.textContent = "Saving…"; }
+  async function trFlush() {
+    clearTimeout(TRK.timer);
+    if (!TRK.entry) return;
+    TRK.entry.updatedAt = new Date().toISOString();
+    await writeLibEntry(trId(), TRK.entry);
+    const s = $("#tr-status"); if (s) s.textContent = "Saved on this device";
+  }
+
+  const trStart = () => state.tracker?.start || "";
+  const trDate = (n) => dateKey(addDays(parseKey(trStart()), n - 1));
+  const trTodayN = () => Math.min(40, Math.max(1, daysBetween(trStart(), todayKey()) + 1));
+  const trShortDate = (k) => parseKey(k).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  /** Reading order: days with a review after each week, then the Day 40 review. */
+  const TR_SEQ = (() => { const s = []; for (let n = 1; n <= 40; n++) { s.push({ t: "day", n }); if (n % 7 === 0 && n <= 35) s.push({ t: "review", k: n / 7 }); } s.push({ t: "review", k: "final" }); return s; })();
+  const dayHasEntry = (n) => { const p = `d${pad2(n)}_`; return Object.entries(TV()).some(([k, v]) => k.startsWith(p) && !k.startsWith(`${p}date`) && v && v.value && v.value !== ""); };
+  const reviewHasEntry = (k) => { const p = k === "final" ? "final_" : `week${k}_`; return Object.entries(TV()).some(([key, v]) => key.startsWith(p) && v && v.value && v.value !== ""); };
+
+  /** Home → tracker: bring in what was already logged on Home for that date. */
+  function trPullFromHome(n) {
+    const k = trDate(n);
+    if (k > todayKey()) return;
+    const rec = state.days[k]?.practices || {}, d = `d${pad2(n)}`;
+    let changed = false;
+    TR_PRACTICES.forEach(([id]) => {
+      const p = rec[id];
+      if (p?.done && !tGet(`${d}_${id}`)) { TV()[`${d}_${id}#0`] = { value: true }; changed = true; }
+      if (p?.min && !tGet(`${d}_${id}_min`)) { TV()[`${d}_${id}_min#0`] = { value: String(p.min) }; changed = true; }
+    });
+    if (trEd() === "men" && rec.retention?.status && !tRadio(`${d}_retention`, ["held", "released"])) { ["held", "released"].forEach((o, i) => (TV()[`${d}_retention#${i}`] = { value: o === rec.retention.status })); changed = true; }
+    if (trEd() === "women" && rec.cycle?.phase && !tRadio(`${d}_cycle`, TR().phases.map((x) => x[0]))) { TR().phases.forEach(([o], i) => (TV()[`${d}_cycle#${i}`] = { value: o === rec.cycle.phase })); changed = true; }
+    if (!tGet(`${d}_date`)) { TV()[`${d}_date#0`] = { value: trShortDate(k) }; changed = true; }
+    if (changed) trQueue();
+  }
+  /** Tracker → Home: keep Home's checklist in step for that date (never for future days). */
+  function trPushToHome(n, what, val) {
+    const k = trDate(n);
+    if (k > todayKey()) return;
+    const rec = day(k, true);
+    if (what === "retention") rec.practices.retention = val ? { status: val, count: val === "released" ? 0 : suggestRetentionCount(k) } : undefined;
+    else if (what === "cycle") rec.practices.cycle = val ? { phase: val } : undefined;
+    else {
+      const p = rec.practices[what] || (rec.practices[what] = { done: false, min: 0 });
+      if (typeof val === "boolean") p.done = val; else { p.min = Math.max(0, Math.min(600, Math.round(Number(val) || 0))); if (p.min > 0) p.done = true; }
+    }
+    Object.keys(rec.practices).forEach((x) => rec.practices[x] === undefined && delete rec.practices[x]);
+    save();
+  }
+
+  async function openTracker(target) {
+    if (!TR()) return;
+    TRK.entry = (await readLibEntry(trId())) || { values: {}, page: 1 };
+    if (!trStart()) TRK.view = "start";
+    else if (target === "today") { TRK.view = "day"; TRK.day = trTodayN(); }
+    else if (!TRK.view || TRK.view === "start") TRK.view = "overview";
+    $("#journey-title").textContent = "40-Day Tracker";
+    renderTracker();
+    if ($("#journey").hidden) openOverlay($("#journey"), closeTracker);
+  }
+  async function closeTracker() {
+    await trFlush();
+    closeOverlay($("#journey"));
+    if (currentView === "home") renderHome();
+    if (currentView === "library") renderPrintablesShelf();
+  }
+  function trGo(view, opts = {}) {
+    Object.assign(TRK, { view }, opts);
+    renderTracker();
+    $("#journey .sheet-inner").scrollTop = 0;
+    setTimeout(() => $("#journey-body h3, #journey-body .tr-num")?.focus?.(), 30);
+  }
+  function renderTracker() {
+    const b = $("#journey-body");
+    if (TRK.view === "start") b.innerHTML = trStartHTML();
+    else if (TRK.view === "day") { trPullFromHome(TRK.day); b.innerHTML = trDayHTML(TRK.day); }
+    else if (TRK.view === "review") b.innerHTML = trReviewHTML(TRK.review);
+    else b.innerHTML = trOverviewHTML();
+  }
+
+  const trDots = (name, opts, labels, cur, aria) => `<div class="tr-dots" role="radiogroup" aria-label="${esc(aria)}">${opts.map((o, i) =>
+    `<button class="tr-dot" role="radio" aria-checked="${cur === o}" data-tr-radio="${name}" data-opts="${opts.join(",")}" data-val="${o}" aria-label="${esc(labels ? labels[i] : o)}">${esc(labels ? labels[i] : o)}</button>`).join("")}</div>`;
+  const trChips = (name, opts, labels, cur, aria) => `<div class="seg tr-seg" role="radiogroup" aria-label="${esc(aria)}">${opts.map((o, i) =>
+    `<button class="chip" role="radio" aria-checked="${cur === o}" aria-pressed="${cur === o}" data-tr-radio="${name}" data-opts="${opts.join(",")}" data-val="${o}">${esc(labels[i])}</button>`).join("")}</div>`;
+  const trText = (name, label, rows = 3, hint = "") => `<label class="field tr-field"><span class="field-label">${label}</span>
+    <textarea data-tr-text="${name}" rows="${rows}" placeholder="${esc(hint)}">${esc(tGet(name) || "")}</textarea></label>`;
+  const trFoot = () => `<p class="tr-status muted small" id="tr-status" aria-live="polite">Saved on this device</p>`;
+
+  function trStartHTML() {
+    const T = TR(), ed = trEd();
+    return `<p class="eyebrow">${ed === "men" ? "Men’s" : "Women’s"} Edition · Sovereign Series</p>
+      <h3 class="tr-h">${esc(T.title)}</h3>
+      <p class="tr-tagline">${esc(T.tagline)}</p>
+      ${T.intro[ed].map((p) => `<p>${esc(p)}</p>`).join("")}
+      <details class="tr-before"><summary>Before you begin</summary><p class="muted">${esc(T.before[ed])}</p></details>
+      <div class="card tr-commit">
+        <p class="eyebrow">My commitment</p>
+        <p class="tr-commit-line">${esc(T.commitment)}</p>
+        <label class="field"><span class="field-label">Name</span><input type="text" data-tr-text="commit_name" value="${esc(tGet("commit_name") || state.profile.name)}" maxlength="60"></label>
+        <label class="field"><span class="field-label">I begin on</span><input type="date" id="tr-start" value="${esc(trStart() || todayKey())}" max="${todayKey()}"></label>
+        ${trText("commit_intention", "I am directing this energy toward", 3)}
+        <label class="field"><span class="field-label">Signed</span><input type="text" data-tr-text="commit_sign" value="${esc(tGet("commit_sign") || "")}" maxlength="60" placeholder="Type your name to sign"></label>
+        <button class="btn btn-primary btn-block" data-tr-begin>${trStart() ? "Save" : "Begin the forty days"}</button>
+      </div>
+      <p class="hint">Started on paper already? Set the date you began, and the days line up.</p>`;
+  }
+
+  function trOverviewHTML() {
+    const T = TR(), now = trTodayN(), started = trStart() <= todayKey();
+    const done = Array.from({ length: 40 }, (_, i) => dayHasEntry(i + 1)).filter(Boolean).length;
+    const cell = (n) => {
+      const k = trDate(n), fut = k > todayKey(), has = dayHasEntry(n);
+      return `<button class="tr-cell ${has ? "has" : ""} ${n === now && started ? "now" : ""} ${fut ? "future" : !has ? "missed" : ""}" data-tr-day="${n}"
+        aria-label="Day ${n}, ${trShortDate(k)}${has ? ", filled in" : fut ? ", ahead" : ""}">${n}</button>`;
+    };
+    const rev = (k, label) => `<button class="tr-cell rev ${reviewHasEntry(k) ? "has" : ""}" data-tr-review="${k}" aria-label="${esc(label)}">${k === "final" ? "40" : "R"}</button>`;
+    const rows = T.weeks.map((w) => `<div class="tr-row"><span class="tr-rowlabel">Week ${w.n}</span><div class="tr-cells">${Array.from({ length: 7 }, (_, i) => cell(w.from + i)).join("")}${rev(w.n, w.name)}</div></div>`).join("") +
+      `<div class="tr-row"><span class="tr-rowlabel">Final</span><div class="tr-cells">${[36, 37, 38, 39, 40].map(cell).join("")}${rev("final", T.final.name)}</div></div>`;
+    return `<p class="eyebrow">${trEd() === "men" ? "Men’s" : "Women’s"} Edition · began ${esc(trShortDate(trStart()))}</p>
+      <h3 class="tr-h">${started ? `Day ${now} of 40` : "Begins soon"}</h3>
+      <div class="progress" role="progressbar" aria-label="Days filled in" aria-valuemin="0" aria-valuemax="40" aria-valuenow="${done}"><span class="progress-fill" style="width:${done / 40 * 100}%"></span></div>
+      <p class="progress-caption">${done} of 40 days filled in</p>
+      ${started ? `<button class="btn btn-primary btn-block" data-tr-day="${now}">Open today’s page</button>` : ""}
+      <div class="tr-grid">${rows}</div>
+      <p class="hint tr-legend"><span class="tr-key has"></span> filled in <span class="tr-key now"></span> today <span class="tr-key rev">R</span> weekly review</p>
+      <div class="btn-row tr-links">
+        <button class="btn" data-tr-commit>My commitment</button>
+        <button class="btn" data-tr-printable>View as printable</button>
+        <button class="link-btn tr-reset" data-tr-reset>Start over</button>
+      </div>`;
+  }
+
+  function trNavHTML(i) {
+    const prev = TR_SEQ[i - 1], next = TR_SEQ[i + 1];
+    const lab = (x) => x.t === "day" ? `Day ${x.n}` : x.k === "final" ? "Day 40 Review" : `Week ${x.k} Review`;
+    const attr = (x) => x.t === "day" ? `data-tr-day="${x.n}"` : `data-tr-review="${x.k}"`;
+    return `<div class="tr-nav">${prev ? `<button class="btn" ${attr(prev)} aria-label="Previous: ${lab(prev)}">‹ ${lab(prev)}</button>` : "<span></span>"}
+      <button class="link-btn" data-tr-overview>All 40 days</button>
+      ${next ? `<button class="btn" ${attr(next)} aria-label="Next: ${lab(next)}">${lab(next)} ›</button>` : "<span></span>"}</div>`;
+  }
+
+  function trDayHTML(n) {
+    const T = TR(), ed = trEd(), d = `d${pad2(n)}`, k = trDate(n), fut = k > todayKey();
+    const idx = TR_SEQ.findIndex((x) => x.t === "day" && x.n === n);
+    const prac = TR_PRACTICES.map(([id, label]) => `<div class="tr-prac">
+        <button class="tr-check" role="checkbox" aria-checked="${!!tGet(`${d}_${id}`)}" data-tr-check="${d}_${id}" data-home="${id}">${CHECK_SVG}<span>${label}</span></button>
+        <label class="tr-min"><input type="number" inputmode="numeric" min="0" max="600" data-tr-text="${d}_${id}_min" data-home-min="${id}" value="${esc(tGet(`${d}_${id}_min`) || "")}" placeholder="0" aria-label="${label} minutes"><span class="muted small">min</span></label></div>`).join("") +
+      `<div class="tr-prac"><button class="tr-check" role="checkbox" aria-checked="${!!tGet(`${d}_movement`)}" data-tr-check="${d}_movement">${CHECK_SVG}<span>Movement</span></button></div>`;
+    const mudra = christian() ? "" : `<div class="tr-sec"><p class="tr-label">Mudra <button class="link-btn tr-what" data-tr-hand>What’s this?</button></p>
+      <div class="seg tr-seg">${T.mudras.map(([id, g, name]) => `<button class="chip tr-mudra" aria-pressed="${!!tGet(`${d}_mudra_${id}`)}" data-tr-check="${d}_mudra_${id}"><span aria-hidden="true">${g}</span> ${name}</button>`).join("")}</div></div>`;
+    const check = ed === "men"
+      ? `${trChips(`${d}_retention`, ["held", "released"], ["Held", "Released"], tRadio(`${d}_retention`, ["held", "released"]), "Held or released")}
+         <p class="tr-label" style="margin-top:14px">Urge strength</p>${trDots(`${d}_urge`, RATE, null, tRadio(`${d}_urge`, RATE), "Urge strength, 1 to 5")}`
+      : trChips(`${d}_cycle`, T.phases.map((x) => x[0]), T.phases.map((x) => x[1]), tRadio(`${d}_cycle`, T.phases.map((x) => x[0])), "Cycle phase");
+    const week = T.weeks.find((w) => n >= w.from && n <= w.to);
+    return `<div class="tr-dayhead"><span class="tr-num" tabindex="-1">${pad2(n)}</span>
+        <span><span class="eyebrow" style="display:block;margin:0">Day ${n} of 40${week ? ` · Week ${week.n}` : ""}</span><span class="tr-date">${esc(fmtLongDate(parseKey(k)))}</span></span></div>
+      ${fut ? `<p class="hint">This day is still ahead. You can read its prompt now and fill it in on the day.</p>` : ""}
+      <blockquote class="tr-prompt">${esc(T.prompts[ed][n - 1])}</blockquote>
+      <fieldset class="tr-body" ${fut ? "disabled" : ""}>
+        <div class="tr-sec"><p class="tr-label">Energy today</p>${trDots(`${d}_energy`, RATE, null, tRadio(`${d}_energy`, RATE), "Energy today, 1 to 5")}</div>
+        <div class="tr-sec"><p class="tr-label">Practices</p>${prac}</div>
+        ${mudra}
+        <div class="tr-sec"><p class="tr-label">Check-in</p>${check}</div>
+        ${trText(`${d}_directed`, "Where I directed the energy", 3)}
+        ${trText(`${d}_journal`, esc(T.prompts[ed][n - 1]), 5, "Write freely")}
+      </fieldset>
+      ${trFoot()}${trNavHTML(idx)}`;
+  }
+
+  function trReviewHTML(k) {
+    const T = TR(), ed = trEd(), fin = k === "final", w = fin ? null : T.weeks[k - 1];
+    const p = fin ? "final" : `week${k}`, qs = fin ? T.final.questions : T.reviewQ[ed];
+    const idx = TR_SEQ.findIndex((x) => x.t === "review" && String(x.k) === String(k));
+    return `<p class="eyebrow">${fin ? "Forty days" : `Days ${w.from}–${w.to}`}</p>
+      <h3 class="tr-h" tabindex="-1">${esc(fin ? T.final.name : w.name)}</h3>
+      ${w?.title ? `<div class="tr-milestone"><p class="tr-mtitle">${esc(w.title)}</p><p>${esc(w.text)}</p></div>` : ""}
+      <div class="tr-sec"><p class="tr-label">${fin ? "Overall" : "My week, overall"}</p>${trDots(`${p}_overall`, RATE, null, tRadio(`${p}_overall`, RATE), "Overall, 1 to 5")}</div>
+      ${qs.map((q, i) => trText(`${p}_q${i + 1}`, esc(q), 4)).join("")}
+      ${fin ? `<div class="card tr-closing"><p class="eyebrow">${esc(T.final.closingTitle)}</p><p>${esc(T.final.closing)}</p><p class="tr-quote">${esc(T.final.quote)}</p></div>` : ""}
+      ${trFoot()}${trNavHTML(idx)}`;
+  }
+
+  function trCurrentDayOf(el) { const m = el.closest("[data-tr-text], [data-tr-check], [data-tr-radio]"); const name = m && (m.dataset.trText || m.dataset.trCheck || m.dataset.trRadio) || ""; const x = name.match(/^d(\d\d)_/); return x ? Number(x[1]) : null; }
+
+  function bindTracker() {
+    const body = $("#journey-body");
+    $("#close-journey").addEventListener("click", closeTracker);
+    $("#journey").addEventListener("click", (e) => { if (e.target.id === "journey") closeTracker(); });
+    body.addEventListener("click", async (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      if (b.dataset.trDay) return trGo("day", { day: Number(b.dataset.trDay) });
+      if (b.dataset.trReview) return trGo("review", { review: b.dataset.trReview === "final" ? "final" : Number(b.dataset.trReview) });
+      if (b.hasAttribute("data-tr-overview")) return trGo("overview");
+      if (b.hasAttribute("data-tr-commit")) return trGo("start");
+      if (b.hasAttribute("data-tr-printable")) { await trFlush(); closeOverlay($("#journey")); return openPrintables(trId()); }
+      if (b.hasAttribute("data-tr-hand")) { await trFlush(); closeOverlay($("#journey")); go("guide"); return ensureGuide().then(() => openGuideItem("hand-overview")); }
+      if (b.hasAttribute("data-tr-begin")) {
+        const start = $("#tr-start").value || todayKey();
+        if (start > todayKey()) { toast("Choose today or a day in the past."); return; }
+        const first = !trStart();
+        state.tracker = { ...(state.tracker || {}), start, edition: trEd() }; save();
+        tSet("commit_start", fmtLongDate(parseKey(start)));
+        const nm = body.querySelector('[data-tr-text="commit_name"]')?.value.trim(); if (nm && !tGet("commit_name")) tSet("commit_name", nm);
+        await trFlush();
+        toast(first ? "Day one begins. Go gently." : "Commitment saved");
+        return first ? trGo("day", { day: trTodayN() }) : trGo("overview");
+      }
+      if (b.hasAttribute("data-tr-reset")) {
+        const v = await dialog({ title: "Start the forty days over?", html: "<p>This clears every entry in your tracker, in the app and in the printable. Your Home practice history stays.</p>",
+          actions: [{ label: "Cancel", value: "no" }, { label: "Clear and start over", value: "yes", danger: true }] });
+        if (v !== "yes") return;
+        TRK.entry = { values: {}, page: 1 }; await writeLibEntry(trId(), TRK.entry);
+        state.tracker = null; save();
+        toast("Cleared. Begin again whenever you're ready."); return trGo("start");
+      }
+      if (b.dataset.trRadio) {
+        const name = b.dataset.trRadio, opts = b.dataset.opts.split(","), val = b.getAttribute("aria-checked") === "true" ? null : b.dataset.val;
+        tSetRadio(name, opts, val);
+        b.parentElement.querySelectorAll("[data-tr-radio]").forEach((x) => { const on = x.dataset.val === val; x.setAttribute("aria-checked", on); if (x.classList.contains("chip")) x.setAttribute("aria-pressed", on); });
+        const n = trCurrentDayOf(b);
+        if (n && /_retention$/.test(name)) trPushToHome(n, "retention", val);
+        if (n && /_cycle$/.test(name)) trPushToHome(n, "cycle", val);
+        return;
+      }
+      if (b.dataset.trCheck) {
+        const name = b.dataset.trCheck, on = !tGet(name);
+        tSet(name, on);
+        b.setAttribute(b.classList.contains("chip") ? "aria-pressed" : "aria-checked", on);
+        if (b.dataset.home) trPushToHome(trCurrentDayOf(b), b.dataset.home, on);
+      }
+    });
+    body.addEventListener("input", (e) => {
+      const t = e.target.closest("[data-tr-text]"); if (!t) return;
+      tSet(t.dataset.trText, t.value);
+      if (t.dataset.homeMin) {
+        const n = trCurrentDayOf(t), check = body.querySelector(`[data-tr-check="${t.dataset.trText.replace(/_min$/, "")}"]`);
+        if (Number(t.value) > 0 && check && check.getAttribute("aria-checked") !== "true") { tSet(check.dataset.trCheck, true); check.setAttribute("aria-checked", "true"); }
+        clearTimeout(t._home); t._home = setTimeout(() => trPushToHome(n, t.dataset.homeMin, t.value), 600);
+      }
+    });
+  }
+  /** Back button inside the tracker: page → overview → close. */
+  function trackerBack() { if (TRK.view === "day" || TRK.view === "review" || (TRK.view === "start" && trStart())) trGo("overview"); else closeTracker(); }
+
+  function renderTrackerCard() {
+    const el = $("#tracker-card");
+    if (!el) return;
+    if (!TR() || !trStart() || state.tracker?.edition && state.tracker.edition !== trEd()) { el.innerHTML = ""; return; }
+    const n = trTodayN(), over = daysBetween(trStart(), todayKey()) >= 40;
+    if (over && daysBetween(trStart(), todayKey()) > 47) { el.innerHTML = ""; return; }
+    el.innerHTML = `<div class="card tr-card">
+      <p class="eyebrow">${esc(TR().title)}</p>
+      <h2>${over ? "Forty days complete" : `Day ${n} of 40`}</h2>
+      <div class="progress" aria-hidden="true"><span class="progress-fill" style="width:${Math.min(40, n) / 40 * 100}%"></span></div>
+      ${over ? `<p class="muted" style="margin:12px 0 0">Close the forty days with your Day 40 review.</p>` : `<p class="tr-card-prompt">${esc(TR().prompts[trEd()][n - 1])}</p>`}
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn btn-primary" data-trc="${over ? "final" : "today"}">${over ? "Day 40 review" : "Open today’s page"}</button>
+        <button class="btn" data-trc="all">All 40 days</button></div></div>`;
   }
 
   /* ========================================================================
@@ -3023,7 +3331,7 @@
     }
     if (IS_FULL) document.body.classList.add("full-view");
     if (christian()) G.tab = "scripture";
-    bindHome(); bindBanners(); bindGuide(); bindFocus(); bindDaycycle(); bindPacer(); bindMini(); bindSound(); bindCueSliders(); bindTimer(); bindLibrary(); bindJournal(); bindSettings();
+    bindHome(); bindBanners(); bindGuide(); bindFocus(); bindDaycycle(); bindTracker(); bindPacer(); bindMini(); bindSound(); bindCueSliders(); bindTimer(); bindLibrary(); bindJournal(); bindSettings();
     $$(".nav-btn").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
     go("home");
     refreshMini();

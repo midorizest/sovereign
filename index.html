@@ -28,6 +28,7 @@
   <script src="js/protocols.js" defer></script>
   <script src="content/daycycle.js" defer></script>
   <script src="content/scripture.js" defer></script>
+  <script src="content/tracker.js" defer></script>
   <script src="js/sound-engine.js" defer></script>
   <script src="js/app.js" defer></script>
 </head>
@@ -210,6 +211,9 @@
 
         <!-- Daycycle (optional): today's cycles and a plan for the day -->
         <div id="daycycle-card"></div>
+
+        <!-- 40-Day Energy Tracker, once begun -->
+        <div id="tracker-card"></div>
 
         <!-- Today's focus: one Guide practice chosen for real-world use -->
         <div id="focus-card"></div>
@@ -457,6 +461,16 @@
         <button class="icon-btn" id="close-daycycle" aria-label="Close Daycycle">✕</button>
       </div>
       <div id="daycycle-body"></div>
+    </div>
+  </section>
+
+  <section id="journey" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="journey-title">
+    <div class="sheet-inner">
+      <div class="sheet-head">
+        <h2 id="journey-title" class="view-title">40-Day Tracker</h2>
+        <button class="icon-btn" id="close-journey" aria-label="Close the tracker">✕</button>
+      </div>
+      <div id="journey-body"></div>
     </div>
   </section>
 
