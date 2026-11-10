@@ -1,7 +1,8 @@
 # Sovereign for Android (beta)
 
 GitHub Actions builds this automatically on every push to `main`
-(`.github/workflows/android.yml`) and posts the APK to the **beta** release:
+(`.github/workflows/android.yml`), once the version check and app tests have passed
+(`.github/workflows/tests.yml`), and posts the APK to the **beta** release:
 https://github.com/midorizest/sovereign/releases/tag/beta
 
 - `prepare-web.mjs` copies the web app into `www/` and allows Capacitor's inline bridge in the CSP.

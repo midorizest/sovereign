@@ -1,7 +1,7 @@
 {
   "name": "sovereign-android",
   "private": true,
-  "version": "1.9.0",
+  "version": "1.16.0",
   "description": "Builds the Sovereign web app into an Android APK with Capacitor",
   "scripts": { "prepare-web": "node prepare-web.mjs" },
   "dependencies": {

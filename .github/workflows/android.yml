@@ -13,7 +13,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The version check and the app tests must pass before an APK is built.
+  checks:
+    uses: ./.github/workflows/tests.yml
+    permissions:
+      contents: read
+
   build:
+    needs: checks
     runs-on: ubuntu-latest
     defaults:
       run:

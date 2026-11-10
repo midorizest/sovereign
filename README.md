@@ -1,7 +1,9 @@
-# Sovereign — Cultivation & Mastery (v1.8 · Web + Chrome Extension)
+# Sovereign — Cultivation & Mastery (v1.16.0 · Web + Chrome Extension + Android beta)
 
 A private, offline-capable practice tracker and teaching app for sexual energy cultivation.
 No account, no server, no tracking. Everything stays on the device.
+
+One codebase ships three ways: a website that installs as an app (PWA), a Chrome extension (side panel), and an Android app (beta). The web app is described first; the [Chrome extension](#chrome-extension-side-panel), [Android app](#android-app-beta) and [tests](#checks-and-tests) have their own sections below.
 
 ## What's in this build
 
@@ -12,6 +14,27 @@ No account, no server, no tracking. Everything stays on the device.
 - **Lesson**: *What Is Sexual Energy?* (~700 words, loaded only when opened), with Mark as Complete (+20)
 - **Journal**: daily question + 30 rotating prompts, auto-saved drafts, calendar view, entries by month or day
 - **Settings**: name, track, level, reminder, dark/light theme, export / import backup (JSON), reset all data
+- **40-Day Energy Tracker (v1.15–v1.16)**, opened from the card on Home:
+  - One day per page for 40 days, a review page after each week, and a final review.
+  - It opens with an introduction that must be acknowledged before day 1, then asks for a start date.
+  - It shares its entries with the printable tracker in the Library, and stays in step with the Home checklist: what's logged in one shows in the other.
+  - With App lock on, tracker entries are stored encrypted.
+  - Wording and fields are in `content/tracker.js`.
+- **Printables — the Sovereign Library (v1.14)**, on the Library tab:
+  - Fillable PDFs shown inside the app exactly as designed: the 40-Day Energy Tracker in a men's and a women's edition.
+  - Entries save on the device automatically and are included in backups. **Save a copy** writes a filled PDF.
+  - Everything is in `library/` (see `library/README.md`). To add a printable, add its PDF and cover and list it in `library/catalog.js`.
+- **Daycycle (v1.10–v1.13)**, optional, offered during setup and in Settings:
+  - A plan for the day drawn from three biorhythm cycles, calculated on the device from the birth date and linked to the practices that suit the day.
+  - A wake-to-sleep plan built around the member's usual wake time and bedtime, an evening check-in, and a day summary.
+  - With App lock on, the birth date is stored encrypted.
+  - Content is in `content/daycycle.js`.
+- **Faith path (v1.11)**, chosen during setup and in Settings › Faith & Scripture:
+  - **Open** (the default): the practice as taught, from Taoist, yogic and esoteric sources.
+  - **Blended**: the full practice with Scripture and Christian prayer alongside, and a verse every other day on Home.
+  - **Christian**: grounded in Scripture and Christian prayer. Practices from other traditions are set aside, Christian breath prayers and a prayer rope take their place, and reminders use a bell instead of Om.
+  - Two public-domain translations (King James, World English Bible). Verses and prayers are in `content/scripture.js`.
+- **Mini player (v1.13)**: a Sound session shows a small player on every screen, so it can be paused or stopped from anywhere.
 - **Guide tab (new in v1.1)**, with two sections:
   - **Build**: ways to generate and store the energy — sleep, lowering stimulation, ojas nutrition, pelvic floor training, Testicle / Ovarian Breathing, strength training, earth contact, the Microcosmic Orbit, root mudras, and (women's track) cycle seasons and Taoist breast massage.
   - **Apply**: ways to use it in real life — the 90-Second Redirect for urges, turning anger into direction, the Creative First Hour, the Transmutation Sprint, the before-sleep subconscious technique, sealing an intention, grounded presence, pendulum defense, partner practice, movement, belly-based decisions, giving from overflow, and (women's track) planning the month by phase.
@@ -37,10 +60,10 @@ No account, no server, no tracking. Everything stays on the device.
   - **Recommended creator:** fill in `SOV.SOUND.credits` in `js/content.js` (name, url, note) to show a shout-out card with a link at the bottom of the Sound tab. It stays hidden while the url is empty.
 - **Privacy & security (v1.8):**
   - Optional **App lock** (Settings › Privacy & security). It uses a passcode with auto-lock (when closed, or after 5 or 30 minutes away) and a lock button in the top bar.
-  - With the lock on, journal entries and drafts are stored **encrypted** with AES-256-GCM, using a key derived via PBKDF2-SHA-256 (600,000 iterations). The key exists only in memory while unlocked. In the extension, it's kept in Chrome's memory-only session storage for the auto-lock window. Code is in `js/security.js`.
+  - With the lock on, journal entries and drafts, 40-Day Tracker entries and the Daycycle birth date are stored **encrypted** with AES-256-GCM, using a key derived via PBKDF2-SHA-256 (600,000 iterations). The key exists only in memory while unlocked. In the extension, it's kept in Chrome's memory-only session storage for the auto-lock window. Code is in `js/security.js`.
   - **Encrypted backups:** with the lock on, the whole export is encrypted. Importing asks for the passcode.
   - After 5 wrong attempts there's a growing wait (30 s, doubling, up to 15 min), and it survives reloads.
-  - "Forgot passcode" removes the lock and erases only the encrypted journal.
+  - "Forgot passcode" removes the lock and erases what was encrypted: the journal, the tracker entries and the birth date. Practice history, streaks and settings stay.
   - **Discreet notifications** are on by default.
   - A **content security policy** blocks all outside resources and network requests: a meta tag on the web, plus the extension's manifest.
   - Practice logs aren't encrypted, so reminders and streaks keep working in the background, but the whole app sits behind the lock screen.
@@ -74,7 +97,6 @@ No account, no server, no tracking. Everything stays on the device.
   - A floating glass navigation bar, spring-curve motion and staggered entry when a view opens.
   - Fewer all-caps labels and lining numerals.
   - Adapted from the taste-skill "redesign" audit (MIT), kept within Sovereign's rules: no frameworks, no network, WCAG AA contrast, and reduced motion respected.
-- The remaining protocols and lessons appear as "coming in the next build" so members can see the path ahead.
 
 ## File structure
 
@@ -84,18 +106,36 @@ sovereign/
 ├── manifest.json               PWA install settings
 ├── sw.js                       Service worker (offline caching)
 ├── css/styles.css              All styling (dark + light themes)
-├── js/content.js               All written content: disclaimer, practices, protocols,
-│                               lesson list, 30 journal prompts, milestone messages
-├── js/app.js                   All app logic
+├── js/
+│   ├── app.js                  All app logic
+│   ├── content.js              Disclaimer, practices, lesson list, journal prompts,
+│   │                           milestone messages, sound presets
+│   ├── protocols.js            The 11 guided protocols
+│   ├── security.js             App lock: key derivation and encryption
+│   ├── sound-engine.js         Binaural / isochronic sound, generated live
+│   └── noise-worklet.js        Pink and brown noise
 ├── content/
-│   ├── lesson-what-is-sexual-energy.js   Lesson text (lazy-loaded)
-│   ├── guide.js                Build / Apply guide content (lazy-loaded)
-│   ├── deepen.js               Deepen content, Books list, pacer patterns
-│   └── lesson-energetic-signature.js
-└── icons/                      App icons (SVG + PNG + maskable)
+│   ├── lesson-*.js             The 10 lesson texts (each loaded only when opened)
+│   ├── guide.js                Guide: Build / Apply
+│   ├── deepen.js               Guide: Deepen, Books list, breath pacer patterns
+│   ├── hand.js                 The Planetary Hand
+│   ├── daycycle.js             Daycycle
+│   ├── scripture.js            Faith path: verses, prayers, what each path shows
+│   └── tracker.js              40-Day Energy Tracker
+├── library/                    Printables: fillable PDFs, the reader, bundled pdf.js
+├── fonts/                      Cormorant Garamond and Plus Jakarta Sans (open-font licences)
+├── icons/                      App icons (SVG + PNG + maskable)
+├── privacy.html, support.html  Privacy policy and support page
+├── extension/                  Chrome extension: manifest, background worker, audio page
+├── build_extension.py          Builds the Chrome extension into dist/
+├── android-build/              Android app: Capacitor config, native audio, icons
+├── tools/release.py            Sets the version and keeps the file lists current
+├── tests/                      Automated tests
+├── store-assets/, STORE_LISTING.md   Chrome Web Store listing material
+└── .github/workflows/          Checks on every push; Android APK build on main
 ```
 
-To edit any wording, open `js/content.js` (or `content/guide.js` / `content/deepen.js` for the Guide). You never need to touch `app.js` for content.
+To edit wording, open the matching content file: `js/content.js`, `js/protocols.js`, or a file in `content/`. You never need to touch `app.js` for content.
 
 ## Running it on your Chromebook
 
@@ -140,25 +180,29 @@ work offline or install. Choose **one** of the options below.
 
 ## Your data
 
-- Data is saved in the browser's local storage on that one device and browser profile.
+- Data is saved in the browser's local storage on that one device and browser profile. Entries typed into the printables are kept in the browser's IndexedDB storage alongside it.
 - **Clearing browsing data (cookies and site data) erases it.** Use **Settings › Export backup** regularly; the file lands in your Downloads folder. **Import backup** restores it, including onto a new device.
 - The app asks Chrome to protect its storage from automatic clean-up, and shows a backup reminder on Home every two weeks.
 
 ## Shipping updates
 
-When you change any file, open `sw.js` and bump `CACHE_VERSION` (e.g. `sovereign-v1.0.1`).
-Users get the new version the next time they open the app while online and then reopen it.
-If you add new files, add them to the `APP_SHELL` list in `sw.js`.
+1. Make your changes.
+2. Set the new version number in one step:
+   ```
+   python3 tools/release.py 1.17.0
+   ```
+   This writes the version everywhere it appears (the app, the service worker's cache name, the extension manifest, the Android package file, and the mentions in this README and `STORE_LISTING.md`). It also refreshes the list of files the service worker stores for offline use, so new files are never left out.
+3. Commit and push. GitHub runs the checks described under [Checks and tests](#checks-and-tests); on `main`, the Android APK is built only if they pass.
+
+Members on the web get the new version the next time they open the app while online and then reopen it. The new cache name is what tells their browser to fetch it, which is why the version must change with every release.
+
+If you added files without changing the version, run `python3 tools/release.py --fix` to refresh the file lists. Running it with nothing after it only checks, and changes nothing.
 
 ## Known limitations
 
-- **Reminders only fire while the app is open or minimised.** A web app with no server
-  cannot wake itself at a set time. When the reminder time has passed and nothing has been
+- **On the web, reminders only fire while the app is open or minimised.** A web app with no server
+  cannot wake itself at a set time. (The Chrome extension and the Android app deliver reminders when Sovereign is closed.) When the reminder time has passed and nothing has been
   practised, a banner also appears on Home.
-- **Fonts:** to keep the app 100% offline with no CDN, it uses Cormorant Garamond / Playfair
-  Display if installed, otherwise elegant system serifs (Palatino, Georgia). On a Chromebook
-  this looks close to the design; to bundle Cormorant exactly, add the `.woff2` files to a
-  `fonts/` folder and an `@font-face` rule, and list them in `sw.js`.
 - **One device per person.** There's no sync. Members move data between devices with export/import.
 - **Not a multi-member admin tool.** Each member installs their own copy; you can't see their progress. That's by design (privacy), but it means accountability is self-reported.
 - **Streak rule:** any logged practice, protocol or journal entry counts the day. A streak stays alive until the end of the following day.
@@ -179,19 +223,20 @@ What's different from the web version:
 
 ## Extension files
 ```
-extension/manifest.json        Manifest V3: side panel, permissions, icons, version
+extension/manifest.json        Manifest V3: side panel, permissions, icons, and the version
+                               (set it with tools/release.py, not by hand)
 extension/background.js        Toolbar → side panel; daily reminder; sound-session logging
 extension/offscreen.html/.js   Hidden audio page so sound keeps playing when the panel closes
 build_extension.py             Builds dist/ from the shared source
 dist/sovereign-extension/      Built extension (Load unpacked this folder)
-dist/sovereign-extension-1.8.0.zip   Upload this to the Chrome Web Store
+dist/sovereign-extension-1.16.0.zip   Upload this to the Chrome Web Store
 privacy.html                   Privacy policy (publish it; the store requires a URL)
 STORE_LISTING.md               Every field for the store dashboard, ready to paste
 store-assets/                  Icon, 5 screenshots, promo tiles (exact required sizes)
 ```
 
 ## Testing the extension on your Chromebook
-1. Unzip `sovereign-extension-1.8.0.zip` into a folder in *My files › Downloads*.
+1. Unzip `sovereign-extension-1.16.0.zip` into a folder in *My files › Downloads*.
 2. In Chrome, go to `chrome://extensions` and turn on **Developer mode** (top right).
 3. Click **Load unpacked** and select the unzipped folder (the one containing `manifest.json`).
 4. Pin Sovereign: click the puzzle-piece icon in the toolbar, then the pin next to Sovereign.
@@ -205,7 +250,7 @@ Content and app files are shared, so edit them once in the source folder. Then:
 ```
 python3 build_extension.py
 ```
-This needs Python 3 and Pillow (`pip install pillow`). On a Chromebook, run it in the Linux terminal. Remember to bump `"version"` in `extension/manifest.json` before each store upload.
+This needs Python 3 and Pillow (`pip install pillow`). On a Chromebook, run it in the Linux terminal. Set the new version first with `python3 tools/release.py <version>` (see [Shipping updates](#shipping-updates)); the Chrome Web Store rejects an upload whose version hasn't gone up.
 
 ## Publishing the privacy policy
 The store needs a public privacy-policy URL.
@@ -214,3 +259,46 @@ The store needs a public privacy-policy URL.
 
 ## Submitting
 Follow `STORE_LISTING.md` top to bottom: package, listing text, images, privacy answers, distribution, reviewer notes, and a final checklist.
+
+---
+
+# Android app (beta)
+
+The same app is wrapped as an Android app with Capacitor. GitHub builds a signed APK on every push to `main`, after the checks pass, and posts it to the **beta** release. Details, including the signing key, are in `android-build/README.md`.
+
+What's different from the web version:
+- **Real reminders:** they arrive when Sovereign is closed, with the Om or bell sound.
+- **Sound in the background:** a native audio service keeps a Sound session playing with the screen off, with controls in the notification.
+- **Backups** go through the Android share sheet, so they can be saved to Files or Drive.
+- **The back button** closes whatever is open before leaving the app.
+- **Storage:** data lives inside the app. Uninstalling it erases the data, so keep exporting backups.
+
+---
+
+# Checks and tests
+
+GitHub runs two things on every push (`.github/workflows/tests.yml`). On `main` they run first, and the Android APK is built only if they pass.
+
+1. **`python3 tools/release.py`** confirms the version number is the same everywhere, that the service worker's offline list matches the files in the repo, and that the extension build includes every app file.
+2. **The tests in `tests/`** open the real app in a browser and check the things that would cost a member their data if they broke:
+   - first-run setup, and every main screen opening without errors
+   - points and streaks, including a streak staying alive through the following day and ending after a missed one
+   - dates following the device's local time (the tests run late at night in New York, two days after a clock change)
+   - the journal
+   - backup export and import, including refusing a file that isn't a Sovereign backup
+   - App lock: the journal unreadable in storage, the lock screen, wrong passcodes and the growing wait, turning the lock off
+   - encrypted backups, restored only with their passcode
+   - data saved by an early version still opening
+   - the app, a lesson and the Library working offline after one visit
+   - the encryption helpers in `js/security.js` on their own
+
+To run them yourself (needs Node.js 22 or newer; on a Chromebook, in the Linux terminal):
+```
+python3 tools/release.py
+cd tests
+npm ci
+npx playwright install chromium
+npm test
+```
+
+The tests cover the web app. The Chrome extension's background worker and the Android native code are not tested automatically; test those by hand as described above.

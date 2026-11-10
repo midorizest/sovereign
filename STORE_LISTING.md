@@ -1,11 +1,11 @@
-# Chrome Web Store Submission — Sovereign v1.8.0
+# Chrome Web Store Submission — Sovereign v1.16.0
 
 Copy each field below into the Chrome Web Store Developer Dashboard (chrome.google.com/webstore/devconsole). Everything here matches what the extension actually does, which is what reviewers check.
 
 ---
 
 ## 1. Package
-Upload: `sovereign-extension-1.8.0.zip` (the zip itself, not unzipped)
+Upload: `sovereign-extension-1.16.0.zip` (the zip itself, not unzipped)
 
 ## 2. Store listing tab
 

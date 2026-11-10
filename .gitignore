@@ -1,0 +1,5 @@
+# Built extension (python3 build_extension.py)
+dist/
+# Test tooling
+node_modules/
+__pycache__/
